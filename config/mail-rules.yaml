@@ -1,0 +1,143 @@
+# Sample configuration. Folder IDs are placeholders; discover your Outlook IDs
+# with `uv run outlook-organizer mail folders` before applying mail triage.
+version: 2
+
+folder_scan_limit: 1000
+folders:
+  inbox:
+    name: Inbox
+    id: 101
+
+  organized_primary:
+    name: aOrganized
+    id: 102
+
+  organized_secondary:
+    name: bOrganized
+    id: 103
+
+  untrusted_external:
+    name: Untrusted External
+    id: 104
+    parent: organized_secondary
+
+  safe_external:
+    name: Safe External
+    id: 105
+    parent: organized_primary
+
+  leadership:
+    name: Leadership
+    id: 106
+    parent: organized_primary
+
+  my_team:
+    name: My Team
+    id: 107
+    parent: organized_primary
+
+  company_announcements:
+    name: Company Announcements
+    id: 108
+    parent: organized_primary
+
+  assistants:
+    name: Assistants
+    id: 109
+    parent: organized_primary
+
+  internal_general:
+    name: Internal General
+    id: 110
+    parent: organized_primary
+
+  junk_external:
+    name: Junk External
+    id: 111
+    parent: organized_secondary
+
+annotations:
+  - id: flagged-needs-action
+    description: Keep flagged messages visible in the Inbox
+    when:
+      flagged: true
+    section: Needs attention
+    add_category: "@Action"
+    keep_in_inbox: true
+
+  - id: sent-only-to-me
+    description: Message is addressed only to me
+    when:
+      recipient: only_me
+    add_category: "@Only Me"
+
+routes:
+  - id: route-leadership
+    description: Mail from configured leaders
+    when:
+      sender_group: leadership
+    move_to: leadership
+    category: "@Leadership"
+
+  - id: route-assistants
+    description: Mail from assistants
+    when:
+      sender_group: assistants
+    move_to: assistants
+    category: "@Assistants"
+
+  - id: route-my-team
+    description: Mail from team members
+    when:
+      sender_group: my_team
+    move_to: my_team
+    category: "@My Team"
+
+  - id: route-company-announcements
+    description: Configured company distribution lists
+    when:
+      sender_type: internal
+      distribution_list_group: company_announcements
+    move_to: company_announcements
+    category: "@Company Announcements"
+
+  - id: route-other-internal-distribution
+    description: Other internal distribution lists recognized by Outlook
+    when:
+      sender_type: internal
+      distribution_list: true
+    move_to: company_announcements
+    category: "@Company Announcements"
+
+  - id: route-junk-external
+    description: Known junk senders and untrusted external mail with a junk keyword
+    when:
+      sender_type: junk_external
+    move_to: junk_external
+    category: "@Junk External"
+
+  - id: route-safe-external
+    description: Mail from an approved external domain or sender
+    when:
+      sender_type: safe_external
+    move_to: safe_external
+    category: "@Safe External"
+
+  - id: route-untrusted-external
+    description: Untrusted external mail not classified as safe or known junk
+    when:
+      sender_type: unknown_external
+    move_to: untrusted_external
+    category: "@Untrusted External"
+
+  - id: route-internal-general
+    description: General internal mail
+    when:
+      sender_type: internal
+    move_to: internal_general
+    category: "@Internal General"
+
+default:
+  keep_in_inbox: true
+  category: "@Others"
+  section: Others

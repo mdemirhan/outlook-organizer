@@ -1,0 +1,8 @@
+[mcp_servers.outlook_organizer]
+command = "/Users/tcmudemirhan/src/pythonproj/outlook-organizer/.venv/bin/outlook-organizer"
+args = ["mcp"]
+cwd = "/Users/tcmudemirhan/src/pythonproj/outlook-organizer"
+default_tools_approval_mode = "writes"
+startup_timeout_sec = 20
+tool_timeout_sec = 90
+enabled = true

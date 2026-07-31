@@ -1,0 +1,41 @@
+[project]
+name = "outlook-organizer"
+version = "0.1.0"
+description = "Local-first Outlook for Mac email organization and calendar analysis"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "mcp>=1.12,<2",
+  "pydantic>=2.10,<3",
+  "pyyaml>=6.0.2,<7",
+  "rich>=14,<16",
+  "typer>=0.16,<1",
+]
+
+[project.scripts]
+outlook-organizer = "outlook_organizer.cli:app"
+outlook-distiller = "outlook_organizer.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<10",
+  "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/outlook_organizer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

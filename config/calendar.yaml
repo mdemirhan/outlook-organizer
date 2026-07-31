@@ -1,0 +1,27 @@
+# Sample configuration. Replace these values in ~/.config/outlook-organizer/.
+version: 1
+timezone: America/Los_Angeles
+calendar_names:
+  - Calendar
+maximum_calendar_id: 1000
+
+working_hours:
+  monday: ["09:00", "18:00"]
+  tuesday: ["09:00", "18:00"]
+  wednesday: ["09:00", "18:00"]
+  thursday: ["09:00", "18:00"]
+  friday: ["09:00", "18:00"]
+
+preferences:
+  lunch_window: ["12:00", "13:30"]
+  minimum_focus_block_minutes: 90
+  meeting_buffer_minutes: 10
+  maximum_meeting_hours_per_day: 5
+  avoid_back_to_back_meetings: true
+  preferred_focus_windows:
+    - ["09:00", "11:00"]
+
+protected_relationships:
+  high_priority:
+    - leadership
+    - my_team

@@ -1,0 +1,44 @@
+# Sample configuration. Copy all files in this directory to
+# ~/.config/outlook-organizer/ and replace these example values.
+version: 2
+
+identity:
+  name: Example User
+  addresses:
+    - example.user@corp.example
+    - example.alias@corp.example
+
+internal_domains:
+  - corp.example
+
+groups:
+  leadership:
+    - leader@corp.example
+  my_team:
+    - teammate@corp.example
+  assistants:
+    - assistant@corp.example
+
+safe_external:
+  domains:
+    - trusted-partner.example
+  addresses:
+    # Trust this sender without trusting every public.example sender.
+    - trusted.sender@public.example
+
+distribution_list_groups:
+  company_announcements:
+    - announcements@corp.example
+    - monitoring@corp.example
+
+junk_external:
+  # Domains include their subdomains.
+  domains:
+    - unwanted.example
+  addresses:
+    - marketing@otherwise-valid.example
+  # Applied only to otherwise-untrusted external mail. Keywords are searched
+  # case-insensitively in the subject and sender address.
+  keywords:
+    - newsletter
+    - commercial
