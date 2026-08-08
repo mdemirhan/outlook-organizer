@@ -7,6 +7,7 @@ from outlook_organizer.config import AppConfig
 from outlook_organizer.models import FlagStatus, TriagePlan
 from outlook_organizer.outlook import OutlookAdapter
 from outlook_organizer.progress import ProgressCallback, format_count, report_progress
+from outlook_organizer.rules.triage import MailTriagePlanner
 from outlook_organizer.state import StateStore
 
 
@@ -28,6 +29,7 @@ class ActionExecutor:
         self.config = config
         self.adapter = adapter
         self.store = store
+        self.planner = MailTriagePlanner(config)
 
     def apply_plan(
         self,
@@ -68,8 +70,13 @@ class ActionExecutor:
             f"Preparing {format_count(len(selected_actions), 'Outlook update')}",
         )
         prepared: list[dict] = []
-        for sequence, action in selected_actions:
-            current = current_messages[action.outlook_id]
+        for sequence, previewed_action in selected_actions:
+            current = current_messages[previewed_action.outlook_id]
+            # The folder preview and this verification read are separate Outlook
+            # snapshots. Reclassify the fresh message so recipient, flag, and
+            # category changes cannot leave us applying a stale rule decision.
+            action = self.planner.plan_message(current)
+            plan.actions[sequence - 1] = action
             before = {
                 "folder_id": current.folder_id,
                 "folder_name": current.folder_name,
@@ -112,6 +119,9 @@ class ActionExecutor:
                 }
             )
 
+        # Keep the persisted plan aligned with the actions actually sent to
+        # Outlook. This also creates the plan record for direct executor use.
+        self.store.save_plan(plan)
         run_id = self.store.start_run(plan.plan_id)
         report_progress(
             progress,

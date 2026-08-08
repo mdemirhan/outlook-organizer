@@ -140,6 +140,52 @@ def test_unconfigured_internal_distribution_list_uses_fallback_route(
     )
 
 
+def test_unconfigured_group_in_cc_does_not_route_direct_mail_as_distribution(
+    app_config, direct_message
+) -> None:
+    direct_message.cc = [
+        Recipient(
+            "Project team",
+            "project-team@corp.example",
+            "public group address",
+        )
+    ]
+
+    action = (
+        MailTriagePlanner(app_config)
+        .create_plan([direct_message], direct_message.folder_id)
+        .actions[0]
+    )
+
+    assert action.move_to == "internal_general"
+    assert "route-other-internal-distribution" not in [
+        match.rule_id for match in action.matches
+    ]
+
+
+def test_configured_distribution_group_in_cc_remains_an_explicit_override(
+    app_config, direct_message
+) -> None:
+    direct_message.cc = [
+        Recipient(
+            "Company Announcements",
+            "announcements@corp.example",
+            "public group address",
+        )
+    ]
+
+    action = (
+        MailTriagePlanner(app_config)
+        .create_plan([direct_message], direct_message.folder_id)
+        .actions[0]
+    )
+
+    assert action.move_to == "company_announcements"
+    assert [match.rule_id for match in action.matches][-1] == (
+        "route-company-announcements"
+    )
+
+
 def test_unmatched_mail_uses_others_category(app_config, direct_message) -> None:
     direct_message.sender_address = "not-an-email-address"
     action = (

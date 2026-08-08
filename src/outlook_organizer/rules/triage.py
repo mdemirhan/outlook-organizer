@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from outlook_organizer.config import AppConfig
 from outlook_organizer.models import (
+    MailMessage,
     MessageFacts,
     PlannedMessageAction,
     TriagePlan,
@@ -25,7 +26,7 @@ class MailTriagePlanner:
         return None
 
     def create_plan(self, messages: list, folder_id: int) -> TriagePlan:
-        actions = [self._plan_message(self.fact_builder.build(message)) for message in messages]
+        actions = [self.plan_message(message) for message in messages]
         return TriagePlan(
             plan_id=f"plan-{uuid.uuid4().hex[:12]}",
             created_at=datetime.now(UTC),
@@ -34,6 +35,10 @@ class MailTriagePlanner:
             actions=actions,
             dry_run=True,
         )
+
+    def plan_message(self, message: MailMessage) -> PlannedMessageAction:
+        """Classify one current Outlook message into its complete desired action."""
+        return self._plan_message(self.fact_builder.build(message))
 
     def _plan_message(self, facts: MessageFacts) -> PlannedMessageAction:
         add_categories: list[str] = []

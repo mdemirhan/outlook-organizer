@@ -26,6 +26,9 @@ safe_external:
     # Trust this sender without trusting every public.example sender.
     - trusted.sender@public.example
 
+# Named list addresses used by the mail-rule `distribution_list_group` predicate.
+# Configuration also lets list senders be recognized when Outlook does not expose
+# a group type. Merely listing an address here does not select a destination.
 distribution_list_groups:
   company_announcements:
     - announcements@corp.example

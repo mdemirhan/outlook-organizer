@@ -202,6 +202,11 @@ class OutlookOrganizerService:
             body_limit=body_limit,
             progress=progress,
         )
+        execution: dict[str, Any] | None = None
+        if confirm:
+            report_progress(progress, "Saving the confirmed triage plan")
+            self.store.save_plan(plan_object)
+            execution = asdict(self.executor.apply_plan(plan_object, progress=progress))
         report_progress(progress, "Building the mail triage report")
         plan = plan_to_dict(plan_object)
         sections: dict[str, list[dict[str, Any]]] = {}
@@ -237,11 +242,6 @@ class OutlookOrganizerService:
         categories = Counter(
             category for action in plan["actions"] for category in action["add_categories"]
         )
-        execution: dict[str, Any] | None = None
-        if confirm:
-            report_progress(progress, "Saving the confirmed triage plan")
-            self.store.save_plan(plan_object)
-            execution = asdict(self.executor.apply_plan(plan_object, progress=progress))
         return {
             "created_at": plan["created_at"],
             "dry_run": not confirm,

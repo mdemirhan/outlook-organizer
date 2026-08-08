@@ -147,6 +147,11 @@ addresses are recognized when they appear as the sender or as a visible To/CC
 recipient. Outlook public and private groups in To/CC are also recognized as
 distribution lists, even when they are not assigned to a configured group.
 
+Defining an address here identifies it and assigns it to a named group; it does
+not by itself choose a destination. Mail rules decide whether to match the named
+group (`distribution_list_group`), mere group presence (`distribution_list`), or
+the more conservative delivery-intent signal (`distribution_delivery`).
+
 ## Mail rules
 
 `mail-rules.yaml` contains stable Outlook folder references and ordered rules.
@@ -221,6 +226,7 @@ The `when` mapping on an annotation or route accepts the following predicates:
 | `sender_type` | classification value | The sender has that domain classification. |
 | `distribution_list_group` | group name | A recognized sender or visible recipient belongs to that configured list group. |
 | `distribution_list` | boolean | A configured or Outlook-detected distribution list is present. |
+| `distribution_delivery` | boolean | The message appears to have been delivered through a distribution list. |
 
 Multiple predicates in one `when` mapping are combined with AND:
 
@@ -243,6 +249,64 @@ when:
 `sender_type` accepts `internal`, `junk_external`, `safe_external`,
 `unknown_external`, or `unknown`. `unknown` means the sender address could not
 be parsed as a complete email address.
+
+#### Distribution-list predicates
+
+These fields are predicates used inside a rule's `when` mapping, not global
+feature switches. Like other boolean predicates, they may be set to `false` to
+match the inverse condition.
+
+Distribution-list identity, presence, and delivery intent are deliberately
+separate:
+
+- `distribution_list: true` matches when a configured list is the sender or
+  when a configured or Outlook-recognized public/private group appears anywhere
+  in To or CC. It is useful for annotation and diagnostics, but is usually too
+  broad for routing.
+- `distribution_delivery: true` is the conservative routing predicate. It is
+  true only when either (a) the sender is a configured list, or (b) a recognized
+  group appears in To and none of the configured identity addresses appears
+  directly in To. A group copied only on CC does not count as the delivery path.
+- `distribution_list_group: <name>` matches a configured list in sender, To, or
+  CC regardless of delivery intent. It acts as an explicit override when placed
+  on a route and is appropriate for known announcement lists that should always
+  have the same destination.
+
+A "recognized group" is either an address in `distribution_list_groups` or a
+To/CC recipient Outlook describes as a `public group address` or
+`private group address`.
+
+| Visible message shape | `distribution_list` | `distribution_delivery` | Named `distribution_list_group` |
+| --- | --- | --- | --- |
+| Configured list is the sender | `true` | `true` | Matches that list's group |
+| Owner is in To; unconfigured Outlook group is only in CC | `true` | `false` | Does not match |
+| Outlook group is in To; owner is not in To | `true` | `true` | Matches only if configured |
+| Owner and Outlook group are both in To | `true` | `false` | Matches only if configured |
+| Owner is in To; configured list is in CC | `true` | `false` | Matches that list's group |
+| No recognized group is visible and sender is not a configured list | `false` | `false` | Does not match |
+
+`distribution_delivery` does not attempt directory membership expansion. It
+uses the sender and visible To/CC metadata exposed by Outlook. A list hidden by
+BCC or returned by Outlook as an unresolved individual address cannot be
+recognized unless its address is explicitly configured.
+
+For a conservative internal distribution fallback, combine sender type with
+delivery intent:
+
+```yaml
+when:
+  sender_type: internal
+  distribution_delivery: true
+```
+
+For a known list that should always win even when it is copied on CC, use the
+named group predicate instead:
+
+```yaml
+when:
+  sender_type: internal
+  distribution_list_group: company_announcements
+```
 
 ### Annotations
 

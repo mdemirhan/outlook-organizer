@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from outlook_organizer.actions import ActionExecutor
-from outlook_organizer.models import FlagStatus, OutlookFolder
+from outlook_organizer.models import FlagStatus, OutlookFolder, Recipient
 from outlook_organizer.rules import MailTriagePlanner
 from outlook_organizer.service import OutlookOrganizerService
 from outlook_organizer.state import StateStore
@@ -118,6 +118,77 @@ def test_known_junk_uses_cached_junk_external_folder_id(
     assert result.status == "completed"
     assert adapter.folder_lookups == 0
     assert adapter.applied[0]["target_folder_id"] == 111
+
+
+def test_apply_reclassifies_message_from_fresh_reread(
+    tmp_path, app_config, direct_message
+) -> None:
+    direct_message.to = []
+    adapter = FakeOutlookAdapter(direct_message)
+    store = StateStore(tmp_path / "state.sqlite")
+    plan = MailTriagePlanner(app_config).create_plan(
+        [direct_message], direct_message.folder_id
+    )
+    store.save_plan(plan)
+    assert plan.actions[0].add_categories == ["@Internal General"]
+
+    direct_message.to = [
+        Recipient("Example User", "example.user@corp.example")
+    ]
+
+    result = ActionExecutor(app_config, adapter, store).apply_plan(plan)
+
+    assert result.status == "completed"
+    assert adapter.applied[0]["categories"] == ["@Internal General", "@Only Me"]
+    refreshed = store.load_plan(plan.plan_id).actions[0]
+    assert refreshed.add_categories == ["@Internal General", "@Only Me"]
+    assert [match.rule_id for match in refreshed.matches] == [
+        "sent-only-to-me",
+        "route-internal-general",
+    ]
+
+
+def test_apply_reclassifies_flag_change_before_moving(
+    tmp_path, app_config, direct_message
+) -> None:
+    adapter = FakeOutlookAdapter(direct_message)
+    store = StateStore(tmp_path / "state.sqlite")
+    plan = MailTriagePlanner(app_config).create_plan(
+        [direct_message], direct_message.folder_id
+    )
+    store.save_plan(plan)
+    assert plan.actions[0].move_to == "internal_general"
+
+    direct_message.flag_status = FlagStatus.FLAGGED
+
+    result = ActionExecutor(app_config, adapter, store).apply_plan(plan)
+
+    assert result.status == "completed"
+    assert adapter.applied[0]["target_folder_id"] is None
+    assert adapter.applied[0]["categories"] == [
+        "@Action",
+        "@Internal General",
+        "@Only Me",
+    ]
+    refreshed = store.load_plan(plan.plan_id).actions[0]
+    assert refreshed.keep_in_inbox
+    assert refreshed.move_to is None
+
+
+def test_apply_preserves_an_existing_rule_category(
+    tmp_path, app_config, direct_message
+) -> None:
+    direct_message.categories = ["@Only Me"]
+    adapter = FakeOutlookAdapter(direct_message)
+    store = StateStore(tmp_path / "state.sqlite")
+    plan = MailTriagePlanner(app_config).create_plan(
+        [direct_message], direct_message.folder_id
+    )
+
+    result = ActionExecutor(app_config, adapter, store).apply_plan(plan)
+
+    assert result.status == "completed"
+    assert adapter.applied[0]["categories"] == ["@Internal General", "@Only Me"]
 
 
 def test_explicit_empty_selection_applies_nothing(tmp_path, app_config, direct_message) -> None:
@@ -267,10 +338,10 @@ def test_confirmed_triage_mail_persists_and_applies_in_one_call(
     assert progress == [
         "Reading up to 1 message from Outlook",
         "Classifying 1 message",
-        "Building the mail triage report",
         "Saving the confirmed triage plan",
         "Verifying 1 message before making changes",
         "Preparing 1 Outlook update",
         "Applying 1 update in Outlook",
         "Recording the audit trail",
+        "Building the mail triage report",
     ]

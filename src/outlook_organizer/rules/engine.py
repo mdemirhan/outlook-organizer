@@ -55,4 +55,10 @@ class RuleEngine:
         if key == "distribution_list":
             actual = facts.has_distribution_list
             return actual is bool(expected), f"distribution-list presence is {actual}"
+        if key == "distribution_delivery":
+            actual = facts.delivered_via_distribution_list
+            return (
+                actual is bool(expected),
+                f"distribution-list delivery is {actual}",
+            )
         raise ValueError(f"Unknown match field: {key}")

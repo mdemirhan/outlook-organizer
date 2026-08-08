@@ -1,5 +1,18 @@
 # Sample configuration. Folder IDs are placeholders; discover your Outlook IDs
 # with `uv run outlook-organizer mail folders` before applying mail triage.
+#
+# Evaluation at a glance:
+# - Every matching annotation applies. Annotations add context or prevent moves.
+# - Routes run from top to bottom; only the first matching route is used.
+# - Multiple fields under `when` are AND conditions.
+# Distribution predicates used under `when` (they are not global switches):
+# - `distribution_list: true`: a configured or Outlook-recognized group appears
+#   as sender, To, or CC. This is broad presence detection.
+# - `distribution_delivery: true`: a configured list sent the message, or a
+#   recognized group is in To while no owner identity is directly in To. This is
+#   the conservative choice for routing; a group only in CC does not match.
+# - `distribution_list_group: NAME`: a configured list in sender, To, or CC
+#   belongs to NAME. Use as an explicit route override for known lists.
 version: 2
 
 folder_scan_limit: 1000
@@ -57,6 +70,8 @@ folders:
     parent: organized_secondary
 
 annotations:
+  # Matches: Outlook's action flag is currently set.
+  # Result: report as Needs attention and keep in Inbox, overriding any route.
   - id: flagged-needs-action
     description: Keep flagged messages visible in the Inbox
     when:
@@ -65,6 +80,8 @@ annotations:
     add_category: "@Action"
     keep_in_inbox: true
 
+  # Matches: every distinct To address is an owner identity and CC is empty.
+  # Result: add context only; routing continues normally.
   - id: sent-only-to-me
     description: Message is addressed only to me
     when:
@@ -72,6 +89,7 @@ annotations:
     add_category: "@Only Me"
 
 routes:
+  # Matches: sender is listed in groups.leadership.
   - id: route-leadership
     description: Mail from configured leaders
     when:
@@ -79,6 +97,7 @@ routes:
     move_to: leadership
     category: "@Leadership"
 
+  # Matches: sender is listed in groups.assistants.
   - id: route-assistants
     description: Mail from assistants
     when:
@@ -86,6 +105,7 @@ routes:
     move_to: assistants
     category: "@Assistants"
 
+  # Matches: sender is listed in groups.my_team.
   - id: route-my-team
     description: Mail from team members
     when:
@@ -93,6 +113,8 @@ routes:
     move_to: my_team
     category: "@My Team"
 
+  # Explicit override: a configured company_announcements address appears as
+  # sender, To, or CC. Use this for lists that should always be routed here.
   - id: route-company-announcements
     description: Configured company distribution lists
     when:
@@ -101,14 +123,18 @@ routes:
     move_to: company_announcements
     category: "@Company Announcements"
 
+  # Fallback for unconfigured internal groups. It matches only when the group
+  # appears to be the delivery path, so a group copied only on CC does not match.
   - id: route-other-internal-distribution
-    description: Other internal distribution lists recognized by Outlook
+    description: Internal mail delivered through an Outlook-recognized group
     when:
       sender_type: internal
-      distribution_list: true
+      distribution_delivery: true
     move_to: company_announcements
     category: "@Company Announcements"
 
+  # Matches: an explicitly junk sender/domain, or otherwise-untrusted external
+  # mail whose subject or sender address contains a configured junk keyword.
   - id: route-junk-external
     description: Known junk senders and untrusted external mail with a junk keyword
     when:
@@ -116,6 +142,7 @@ routes:
     move_to: junk_external
     category: "@Junk External"
 
+  # Matches: external sender address or domain explicitly configured as safe.
   - id: route-safe-external
     description: Mail from an approved external domain or sender
     when:
@@ -123,6 +150,7 @@ routes:
     move_to: safe_external
     category: "@Safe External"
 
+  # Matches: external sender that is neither safe nor known junk.
   - id: route-untrusted-external
     description: Untrusted external mail not classified as safe or known junk
     when:
@@ -130,6 +158,7 @@ routes:
     move_to: untrusted_external
     category: "@Untrusted External"
 
+  # Broad internal fallback. Keep this after people and distribution routes.
   - id: route-internal-general
     description: General internal mail
     when:
@@ -137,6 +166,7 @@ routes:
     move_to: internal_general
     category: "@Internal General"
 
+# Used only when no route above matches. This catches unknown/unparseable senders.
 default:
   keep_in_inbox: true
   category: "@Others"

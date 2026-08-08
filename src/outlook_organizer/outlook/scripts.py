@@ -255,7 +255,14 @@ on run argv
         set messageRefs to messages 1 thru requestedCount of folderRef
         set rows to {}
         repeat with messageIndex from 1 to requestedCount
-            set end of rows to my messageRow(item messageIndex of messageRefs, folderRef, bodyLimit)
+            set messageRef to item messageIndex of messageRefs
+            set receivedDate to missing value
+            try
+                set receivedDate to time received of messageRef
+            end try
+            if receivedDate is not missing value then
+                set end of rows to my messageRow(messageRef, folderRef, bodyLimit)
+            end if
         end repeat
         set previousDelimiters to AppleScript's text item delimiters
         set AppleScript's text item delimiters to character id 30

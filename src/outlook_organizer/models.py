@@ -169,6 +169,7 @@ class MatchConfig(StrictModel):
     ) = None
     distribution_list_group: str | None = None
     distribution_list: bool | None = None
+    distribution_delivery: bool | None = None
 
 
 class AnnotationRule(StrictModel):
@@ -341,6 +342,7 @@ class MessageFacts:
     only_me: bool
     direct_to_me: bool
     has_distribution_list: bool
+    delivered_via_distribution_list: bool
     distribution_lists: list[str]
     distribution_list_groups: list[str] = field(default_factory=list)
 

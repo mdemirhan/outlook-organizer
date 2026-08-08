@@ -30,21 +30,32 @@ class FactBuilder:
         )
         sender_address = normalize_email(message.sender_address)
         visible = [*message.to, *message.cc]
-        to_addresses = [normalize_email(recipient.address) for recipient in message.to]
-        cc_addresses = [normalize_email(recipient.address) for recipient in message.cc]
-        includes_me = any(address in self.me for address in [*to_addresses, *cc_addresses])
-        only_me = len(to_addresses) == 1 and to_addresses[0] in self.me and not cc_addresses
-        direct_to_me = len(to_addresses) == 1 and to_addresses[0] in self.me and bool(cc_addresses)
+        to_addresses = {
+            normalized
+            for recipient in message.to
+            if (normalized := normalize_email(recipient.address))
+        }
+        cc_addresses = {
+            normalized
+            for recipient in message.cc
+            if (normalized := normalize_email(recipient.address))
+        }
+        visible_addresses = to_addresses | cc_addresses
+        includes_me = bool(visible_addresses & self.me)
+        only_me = bool(to_addresses) and to_addresses <= self.me and not cc_addresses
+        direct_to_me = (
+            bool(to_addresses) and to_addresses <= self.me and bool(cc_addresses)
+        )
 
         if only_me:
             directness = Directness.ONLY_ME
         elif direct_to_me:
             directness = Directness.DIRECT_TO_ME
-        elif len(visible) > 1:
+        elif len(visible_addresses) > 1:
             directness = Directness.MULTI_RECIPIENT
         elif includes_me:
             directness = Directness.DIRECT_TO_ME
-        elif visible:
+        elif visible_addresses:
             directness = Directness.NOT_TO_ME
         else:
             directness = Directness.UNKNOWN
@@ -52,6 +63,7 @@ class FactBuilder:
         distribution_lists: list[str] = []
         distribution_list_groups: list[str] = []
         configured_sender_list = self.known_lists.get(sender_address)
+        delivered_via_distribution_list = configured_sender_list is not None
         if configured_sender_list:
             distribution_lists.append(message.sender_name or sender_address)
             distribution_list_groups.append(configured_sender_list)
@@ -69,17 +81,34 @@ class FactBuilder:
                 if configured_list:
                     distribution_list_groups.append(configured_list)
 
+        # Outlook's group type tells us that an address is a group, but not
+        # whether the message reached the owner through that group. Treat an
+        # Outlook-detected group as the delivery path only when it is in To and
+        # no configured identity is directly in To. A group copied on CC is
+        # context on a direct message, not evidence of distribution delivery.
+        identity_in_to = bool(to_addresses & self.me)
+        group_in_to = any(
+            "public group" in recipient.kind.casefold()
+            or "private group" in recipient.kind.casefold()
+            or normalize_email(recipient.address) in self.known_lists
+            for recipient in message.to
+        )
+        delivered_via_distribution_list = delivered_via_distribution_list or (
+            group_in_to and not identity_in_to
+        )
+
         return MessageFacts(
             message=message,
             sender_domain=classification.domain,
             domain_class=classification.domain_class,
             sender_relationship=relationship,
             directness=directness,
-            visible_recipient_count=len(visible),
+            visible_recipient_count=len(visible_addresses),
             includes_me=includes_me,
             only_me=only_me,
             direct_to_me=direct_to_me,
             has_distribution_list=bool(distribution_lists),
+            delivered_via_distribution_list=delivered_via_distribution_list,
             distribution_lists=distribution_lists,
             distribution_list_groups=sorted(set(distribution_list_groups)),
         )

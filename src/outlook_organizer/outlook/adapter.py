@@ -158,6 +158,8 @@ class OutlookAdapter:
         return self._parse_messages(result.stdout)
 
     def _parse_messages(self, output: str) -> list[MailMessage]:
+        if not output.strip():
+            return []
         messages: list[MailMessage] = []
         for row in filter(None, output.split(RS)):
             fields = row.split(US)
