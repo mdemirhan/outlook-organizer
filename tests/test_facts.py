@@ -108,7 +108,9 @@ def test_group_in_to_is_not_delivery_when_owner_is_also_directly_in_to(
     assert not facts.delivered_via_distribution_list
 
 
-def test_unknown_external_is_classified_for_routing(app_config, direct_message) -> None:
-    direct_message.sender_address = "sender@unknown-external.example"
+def test_unclassified_external_is_classified_for_routing(
+    app_config, direct_message
+) -> None:
+    direct_message.sender_address = "sender@unclassified-external.example"
     facts = FactBuilder(app_config.definitions).build(direct_message)
-    assert facts.domain_class is DomainClass.UNKNOWN_EXTERNAL
+    assert facts.domain_class is DomainClass.UNCLASSIFIED_EXTERNAL

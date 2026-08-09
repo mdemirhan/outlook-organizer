@@ -162,7 +162,7 @@ class MatchConfig(StrictModel):
             "internal",
             "junk_external",
             "safe_external",
-            "unknown_external",
+            "unclassified_external",
             "unknown",
         ]
         | None
@@ -195,10 +195,15 @@ class DefaultRouting(StrictModel):
     section: str = "Others"
 
 
+class ThreadingConfig(StrictModel):
+    enabled: bool = False
+
+
 
 class MailRulesConfig(StrictModel):
     version: Literal[2]
     folder_scan_limit: int = Field(default=1000, ge=10, le=100_000)
+    threading: ThreadingConfig = Field(default_factory=ThreadingConfig)
     folders: dict[str, FolderConfig]
     annotations: list[AnnotationRule] = Field(default_factory=list)
     routes: list[RouteRule]
@@ -274,7 +279,7 @@ class DomainClass(StrEnum):
     INTERNAL = "internal"
     JUNK_EXTERNAL = "junk_external"
     SAFE_EXTERNAL = "safe_external"
-    UNKNOWN_EXTERNAL = "unknown_external"
+    UNCLASSIFIED_EXTERNAL = "unclassified_external"
     UNKNOWN = "unknown"
 
 
@@ -324,6 +329,7 @@ class MailMessage:
     categories: list[str]
     body: str = ""
     has_attachments: bool = False
+    thread_guid: str = ""
 
     @property
     def stable_id(self) -> str:
@@ -381,6 +387,16 @@ class TriagePlan:
     folder_id: int
     actions: list[PlannedMessageAction]
     dry_run: bool = True
+    thread_promotions: int = 0
+
+
+@dataclass(slots=True)
+class ThreadMessageState:
+    outlook_id: int
+    exchange_id: str
+    folder_id: int
+    folder_name: str
+    thread_guid: str
 
 
 @dataclass(slots=True)

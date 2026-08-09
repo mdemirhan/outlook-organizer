@@ -170,6 +170,12 @@ on messageRow(messageRef, folderRef, bodyLimit)
         end if
         set end of fieldValues to my cleanField(bodyValue)
         set end of fieldValues to ((count of attachments of messageRef) > 0) as text
+
+        set threadGUIDValue to ""
+        try
+            set threadGUIDValue to «class lOTd» of messageRef as text
+        end try
+        set end of fieldValues to my cleanField(threadGUIDValue)
     end tell
 
     set previousDelimiters to AppleScript's text item delimiters
@@ -348,6 +354,69 @@ on run argv
         set AppleScript's text item delimiters to previousDelimiters
         return outputText
     end tell
+end run
+"""
+)
+
+
+THREAD_STATE_HANDLERS = r"""
+on replaceText(sourceText, searchText, replacementText)
+    set previousDelimiters to AppleScript's text item delimiters
+    set AppleScript's text item delimiters to searchText
+    set textParts to text items of (sourceText as text)
+    set AppleScript's text item delimiters to replacementText
+    set resultText to textParts as text
+    set AppleScript's text item delimiters to previousDelimiters
+    return resultText
+end replaceText
+
+on cleanField(sourceText)
+    set resultText to sourceText as text
+    repeat with codePoint in {30, 31}
+        set resultText to my replaceText(resultText, character id codePoint, " ")
+    end repeat
+    return resultText
+end cleanField
+
+on threadStateRow(messageRef)
+    tell application "Microsoft Outlook"
+        set folderRef to folder of messageRef
+        set exchangeValue to ""
+        try
+            set exchangeValue to exchange id of messageRef as text
+        end try
+        set threadGUIDValue to ""
+        try
+            set threadGUIDValue to «class lOTd» of messageRef as text
+        end try
+        return (id of messageRef as text) & (character id 31) & my cleanField(exchangeValue) & (character id 31) & (id of folderRef as text) & (character id 31) & my cleanField(name of folderRef) & (character id 31) & my cleanField(threadGUIDValue)
+    end tell
+end threadStateRow
+
+on joinRows(rows)
+    set previousDelimiters to AppleScript's text item delimiters
+    set AppleScript's text item delimiters to character id 30
+    set outputText to rows as text
+    set AppleScript's text item delimiters to previousDelimiters
+    return outputText
+end joinRows
+"""
+
+
+READ_THREAD_STATES_BY_IDS = (
+    THREAD_STATE_HANDLERS
+    + r"""
+on run argv
+    set rows to {}
+    tell application "Microsoft Outlook"
+        repeat with messageIDText in argv
+            try
+                set messageRef to message id ((messageIDText as text) as integer)
+                set end of rows to my threadStateRow(messageRef)
+            end try
+        end repeat
+    end tell
+    return my joinRows(rows)
 end run
 """
 )

@@ -114,6 +114,19 @@ def mail_search(
 
 @mcp.tool(
     annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
+def mail_thread_index_status() -> dict[str, Any]:
+    """Show whether optional conversation-aware filing is enabled and indexed."""
+    return _service().thread_index_status()
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
         readOnlyHint=False,
         destructiveHint=False,
         idempotentHint=False,

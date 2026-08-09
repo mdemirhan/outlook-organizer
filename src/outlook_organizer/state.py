@@ -43,6 +43,28 @@ CREATE TABLE IF NOT EXISTS run_actions (
     FOREIGN KEY(run_id) REFERENCES runs(run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_run_actions_run ON run_actions(run_id, sequence);
+CREATE TABLE IF NOT EXISTS thread_routes (
+    scope TEXT NOT NULL,
+    thread_guid TEXT NOT NULL,
+    folder_key TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(scope, thread_guid)
+);
+CREATE TABLE IF NOT EXISTS thread_members (
+    scope TEXT NOT NULL,
+    thread_guid TEXT NOT NULL,
+    outlook_id INTEGER NOT NULL,
+    message_id TEXT NOT NULL,
+    last_folder_id INTEGER NOT NULL,
+    last_folder_key TEXT,
+    detached INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(scope, thread_guid, outlook_id)
+);
+CREATE INDEX IF NOT EXISTS idx_thread_members_lookup
+    ON thread_members(scope, thread_guid, detached);
+CREATE INDEX IF NOT EXISTS idx_thread_members_outlook
+    ON thread_members(scope, outlook_id);
 """
 
 
@@ -50,11 +72,7 @@ class StateStore:
     def __init__(self, path: Path | None = None) -> None:
         if path is None:
             directory = state_dir()
-            organizer_path = directory / "outlook-organizer.sqlite"
-            legacy_path = directory / "outlook-distiller.sqlite"
-            if not organizer_path.exists() and legacy_path.exists():
-                legacy_path.replace(organizer_path)
-            self.path = organizer_path
+            self.path = directory / "outlook-organizer.sqlite"
         else:
             self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,3 +234,172 @@ class StateStore:
                     "UPDATE plans SET status = 'undone' WHERE plan_id = ?",
                     (row["plan_id"],),
                 )
+
+    def thread_index_status(
+        self,
+        scope: str,
+    ) -> dict[str, Any]:
+        with self.connect() as connection:
+            route_count = connection.execute(
+                "SELECT count(*) FROM thread_routes WHERE scope = ?",
+                (scope,),
+            ).fetchone()[0]
+            member_count = connection.execute(
+                "SELECT count(*) FROM thread_members WHERE scope = ?",
+                (scope,),
+            ).fetchone()[0]
+        return {
+            "threads": int(route_count),
+            "members": int(member_count),
+        }
+
+    def thread_contexts(
+        self,
+        scope: str,
+        thread_guids: Iterable[str],
+    ) -> dict[str, dict[str, Any]]:
+        guids = sorted({value for value in thread_guids if value})
+        if not guids:
+            return {}
+        placeholders = ",".join("?" for _ in guids)
+        parameters = [scope, *guids]
+        with self.connect() as connection:
+            route_rows = connection.execute(
+                f"""
+                SELECT thread_guid, folder_key
+                FROM thread_routes
+                WHERE scope = ? AND thread_guid IN ({placeholders})
+                """,
+                parameters,
+            ).fetchall()
+            member_rows = connection.execute(
+                f"""
+                SELECT thread_guid, outlook_id, message_id, last_folder_id,
+                       last_folder_key, detached
+                FROM thread_members
+                WHERE scope = ? AND thread_guid IN ({placeholders})
+                ORDER BY outlook_id
+                """,
+                parameters,
+            ).fetchall()
+        contexts = {
+            str(row["thread_guid"]): {
+                "thread_guid": str(row["thread_guid"]),
+                "folder_key": str(row["folder_key"]),
+                "members": [],
+            }
+            for row in route_rows
+        }
+        for row in member_rows:
+            context = contexts.get(str(row["thread_guid"]))
+            if context is None:
+                continue
+            context["members"].append(
+                {
+                    "thread_guid": str(row["thread_guid"]),
+                    "outlook_id": int(row["outlook_id"]),
+                    "message_id": str(row["message_id"]),
+                    "folder_id": int(row["last_folder_id"]),
+                    "folder_key": row["last_folder_key"],
+                    "detached": bool(row["detached"]),
+                }
+            )
+        return contexts
+
+    def update_thread_index(
+        self,
+        *,
+        scope: str,
+        routes: dict[str, str] | None = None,
+        members: list[dict[str, Any]] | None = None,
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        routes = routes or {}
+        members = members or []
+        with self.connect() as connection:
+            for thread_guid, folder_key in routes.items():
+                connection.execute(
+                    """
+                    INSERT INTO thread_routes
+                        (scope, thread_guid, folder_key, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(scope, thread_guid) DO UPDATE SET
+                        folder_key = excluded.folder_key,
+                        updated_at = excluded.updated_at
+                    """,
+                    (scope, thread_guid, folder_key, now),
+                )
+            for member in members:
+                message_id = str(member.get("message_id", ""))
+                if message_id:
+                    connection.execute(
+                        """
+                        DELETE FROM thread_members
+                        WHERE scope = ? AND message_id = ? AND outlook_id != ?
+                        """,
+                        (scope, message_id, int(member["outlook_id"])),
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO thread_members
+                        (scope, thread_guid, outlook_id, message_id, last_folder_id,
+                         last_folder_key, detached, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scope, thread_guid, outlook_id) DO UPDATE SET
+                        message_id = excluded.message_id,
+                        last_folder_id = excluded.last_folder_id,
+                        last_folder_key = excluded.last_folder_key,
+                        detached = excluded.detached,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        scope,
+                        str(member["thread_guid"]),
+                        int(member["outlook_id"]),
+                        message_id,
+                        int(member["folder_id"]),
+                        member.get("folder_key"),
+                        int(bool(member.get("detached", False))),
+                        now,
+                    ),
+                )
+
+    def delete_thread_members(
+        self,
+        scope: str,
+        outlook_ids: Iterable[int],
+    ) -> set[str]:
+        ids = sorted({int(value) for value in outlook_ids})
+        if not ids:
+            return set()
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT DISTINCT thread_guid FROM thread_members
+                WHERE scope = ? AND outlook_id IN ({placeholders})
+                """,
+                [scope, *ids],
+            ).fetchall()
+            connection.execute(
+                f"""
+                DELETE FROM thread_members
+                WHERE scope = ? AND outlook_id IN ({placeholders})
+                """,
+                [scope, *ids],
+            )
+        return {str(row["thread_guid"]) for row in rows}
+
+    def delete_thread_routes(self, scope: str, thread_guids: Iterable[str]) -> None:
+        guids = sorted({value for value in thread_guids if value})
+        if not guids:
+            return
+        placeholders = ",".join("?" for _ in guids)
+        with self.connect() as connection:
+            connection.execute(
+                f"""
+                DELETE FROM thread_routes
+                WHERE scope = ? AND thread_guid IN ({placeholders})
+                """,
+                [scope, *guids],
+            )

@@ -30,8 +30,6 @@ uv run outlook-organizer config validate
 
 To use another private configuration directory, set
 `OUTLOOK_ORGANIZER_CONFIG` to a directory containing all three files.
-`OUTLOOK_DISTILLER_CONFIG` remains available as a legacy alias. The primary
-variable takes precedence when both are set.
 
 Changing any configuration value changes the configuration fingerprint. A
 previously saved preview cannot be applied after that change; create a fresh
@@ -109,7 +107,7 @@ Sender classification uses this precedence:
 4. `safe_external.addresses`
 5. `safe_external.domains`
 6. `junk_external.keywords`
-7. otherwise `unknown_external`
+7. otherwise `unclassified_external`
 
 Junk keywords are substring-matched against the subject and sender address
 only. They are evaluated only after internal, explicit junk, and safe-external
@@ -163,6 +161,7 @@ Edit the private copy under `~/.config/outlook-organizer/`.
 | --- | --- | --- | --- |
 | `version` | integer | yes | Must be `2`. |
 | `folder_scan_limit` | integer | no | Highest Outlook folder ID inspected during discovery. Default `1000`; allowed range `10`–`100000`. |
+| `threading` | mapping | no | Optional prospective conversation-aware filing. Disabled by default. |
 | `folders` | mapping | yes | Named Outlook folder definitions. |
 | `annotations` | list | no | Non-routing rules; every match applies. Defaults to `[]`. |
 | `routes` | list | yes | Routing rules; first match wins. |
@@ -214,6 +213,80 @@ uv run outlook-organizer mail folders
 Folder IDs can change when an Outlook profile is recreated or a folder is
 deleted and recreated.
 
+### Conversation-aware threading
+
+Threading is opt-in and disabled by default:
+
+```yaml
+threading:
+  enabled: false
+```
+
+Set `enabled: true` to keep SQL-known Outlook conversations together. Each
+message still runs through the ordinary annotation and route rules. For an
+eligible conversation, the highest-priority destination is the route appearing
+earliest in `routes`. A later higher-priority reply promotes both that reply and
+previously indexed managed messages. Threading changes folders only; categories
+remain based on each individual message.
+
+The following remain per-message exceptions and are never pulled into an
+ordinary conversation destination:
+
+- messages retained by `keep_in_inbox`, including flagged mail;
+- `junk_external` and `unclassified_external` routes;
+- messages manually moved outside configured route folders;
+- individual messages manually moved away from the rest of a known thread.
+
+The index is deliberately prospective. Enabling threading does not scan or
+backfill existing Outlook folders. A missing thread GUID in SQLite is
+authoritative and is treated as a new conversation; a full Outlook enumeration
+is never attempted. The thread becomes known only after a confirmed triage run
+successfully processes one of its messages.
+
+For SQL-known conversations, the organizer validates only the recorded Outlook
+message IDs. If every known member was manually moved to the same configured
+route folder, that folder becomes the new conversation destination. A single
+manually moved member becomes a detached exception and is not moved back.
+Messages no longer found in Outlook, messages whose Outlook ID was reused, and
+messages moved outside the configured tree are also detached safely.
+
+#### Junk and unclassified messages in known threads
+
+A conversation GUID establishes association, not sender trust. Consequently,
+thread affinity never overrides a `junk_external` or `unclassified_external`
+classification:
+
+- the junk or unclassified message follows its own configured safety route;
+- it does not inherit the conversation's ordinary destination;
+- it does not change the conversation's canonical destination; and
+- previously filed ordinary members are not moved because of that message.
+
+For example, a junk-classified reply in a conversation routed to CXO moves only
+to `Junk External`; the existing CXO messages remain in CXO, and the next
+ordinary reply still inherits CXO. This is deliberately conservative because
+the explicit junk address/domain or keyword evidence is stronger than thread
+association. If that classification is a false positive, correct
+`junk_external` in `mail-definitions.yaml` before applying the dry run. If it
+was already applied, undo the run or move the message manually after correcting
+the definition. The organizer does not silently move suspected junk into a
+trusted folder.
+
+Inspect the prospective index without reading Outlook folders:
+
+```bash
+uv run outlook-organizer mail threads status
+```
+
+Disabling threading stops all thread lookups and promotions but leaves the
+prospective index intact in case it is enabled again later.
+
+The triage summary's main metrics line shows two threading effects when they
+are nonzero: current Inbox messages whose destination was changed by thread
+affinity, and earlier filed thread members promoted to a higher-priority
+destination. Confirmed-run counts include only successful Outlook updates. In
+the individual message table, `· Threading` is appended to the destination only
+when threading changed that message's ordinary rule destination.
+
 ### Match conditions
 
 The `when` mapping on an annotation or route accepts the following predicates:
@@ -247,8 +320,10 @@ when:
 | `unknown` | Outlook exposes no visible To/CC recipients. |
 
 `sender_type` accepts `internal`, `junk_external`, `safe_external`,
-`unknown_external`, or `unknown`. `unknown` means the sender address could not
-be parsed as a complete email address.
+`unclassified_external`, or `unknown`. `unclassified_external` means the
+sender has a valid external address but matches neither the safe nor junk
+configuration. `unknown` means the sender address could not be parsed as a
+complete email address.
 
 #### Distribution-list predicates
 

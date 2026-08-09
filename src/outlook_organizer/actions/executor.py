@@ -4,11 +4,12 @@ import json
 from dataclasses import dataclass
 
 from outlook_organizer.config import AppConfig
-from outlook_organizer.models import FlagStatus, TriagePlan
+from outlook_organizer.models import FlagStatus, MailMessage, TriagePlan
 from outlook_organizer.outlook import OutlookAdapter
 from outlook_organizer.progress import ProgressCallback, format_count, report_progress
 from outlook_organizer.rules.triage import MailTriagePlanner
 from outlook_organizer.state import StateStore
+from outlook_organizer.threads import ThreadPromotion, ThreadRouter
 
 
 @dataclass(slots=True)
@@ -17,6 +18,8 @@ class ExecutionResult:
     applied: int
     status: str
     error: str | None = None
+    promoted: int = 0
+    thread_routed: int = 0
 
 
 class ActionExecutor:
@@ -30,6 +33,7 @@ class ActionExecutor:
         self.adapter = adapter
         self.store = store
         self.planner = MailTriagePlanner(config)
+        self.thread_router = ThreadRouter(config, adapter, store)
 
     def apply_plan(
         self,
@@ -69,19 +73,34 @@ class ActionExecutor:
             progress,
             f"Preparing {format_count(len(selected_actions), 'Outlook update')}",
         )
+        ordered_messages = [
+            current_messages[action.outlook_id] for _, action in selected_actions
+        ]
+        refreshed_actions = [
+            self.planner.plan_message(message) for message in ordered_messages
+        ]
+        resolution = self.thread_router.resolve(
+            ordered_messages,
+            refreshed_actions,
+            progress=progress,
+        )
+        actions_by_id = {
+            action.outlook_id: action for action in resolution.actions
+        }
         prepared: list[dict] = []
         for sequence, previewed_action in selected_actions:
             current = current_messages[previewed_action.outlook_id]
             # The folder preview and this verification read are separate Outlook
             # snapshots. Reclassify the fresh message so recipient, flag, and
             # category changes cannot leave us applying a stale rule decision.
-            action = self.planner.plan_message(current)
+            action = actions_by_id[current.outlook_id]
             plan.actions[sequence - 1] = action
             before = {
                 "folder_id": current.folder_id,
                 "folder_name": current.folder_name,
                 "categories": current.categories,
                 "flag_status": current.flag_status.value,
+                "thread_guid": current.thread_guid,
             }
             desired_categories = sorted(
                 (set(current.categories) - set(action.remove_categories))
@@ -103,11 +122,14 @@ class ActionExecutor:
                 ),
                 "categories": desired_categories,
                 "flag_status": desired_flag.value,
+                "thread_guid": current.thread_guid,
             }
             prepared.append(
                 {
                     "sequence": sequence,
                     "action": action,
+                    "message": current,
+                    "promotion": None,
                     "before": before,
                     "after": after,
                     "update": {
@@ -118,6 +140,65 @@ class ActionExecutor:
                     },
                 }
             )
+
+        promotion_by_id = {
+            promotion.outlook_id: promotion
+            for promotion in resolution.promotions
+        }
+        promoted_messages = {
+            message.outlook_id: message
+            for message in self.adapter.get_messages(
+                promotion_by_id,
+                body_limit=0,
+            )
+        }
+        applied_promotions: dict[int, tuple[MailMessage, ThreadPromotion]] = {}
+        next_sequence = len(plan.actions) + 1
+        for outlook_id, promotion in promotion_by_id.items():
+            current = promoted_messages.get(outlook_id)
+            if current is None:
+                continue
+            base_action = self.planner.plan_message(current)
+            if not self.thread_router.action_uses_affinity(base_action):
+                continue
+            destination = self.config.mail.folders[promotion.destination_key]
+            if current.folder_id == destination.id:
+                continue
+            before = {
+                "folder_id": current.folder_id,
+                "folder_name": current.folder_name,
+                "categories": current.categories,
+                "flag_status": current.flag_status.value,
+                "thread_guid": current.thread_guid,
+            }
+            after = {
+                "folder_id": destination.id,
+                "folder_name": destination.name,
+                "categories": current.categories,
+                "flag_status": current.flag_status.value,
+                "thread_guid": current.thread_guid,
+            }
+            base_action.move_to = promotion.destination_key
+            base_action.report_section = destination.name
+            prepared.append(
+                {
+                    "sequence": next_sequence,
+                    "action": base_action,
+                    "message": current,
+                    "promotion": promotion,
+                    "before": before,
+                    "after": after,
+                    "update": {
+                        "outlook_id": outlook_id,
+                        "categories": current.categories,
+                        "flag_status": current.flag_status,
+                        "target_folder_id": destination.id,
+                    },
+                }
+            )
+            applied_promotions[outlook_id] = (current, promotion)
+            next_sequence += 1
+        plan.thread_promotions = len(applied_promotions)
 
         # Keep the persisted plan aligned with the actions actually sent to
         # Outlook. This also creates the plan record for direct executor use.
@@ -150,6 +231,9 @@ class ActionExecutor:
         report_progress(progress, "Recording the audit trail")
         results_by_id = {int(result["outlook_id"]): result for result in results}
         applied = 0
+        promoted = 0
+        thread_routed = 0
+        successful_ids: set[int] = set()
         errors: list[str] = []
         for item in prepared:
             action = item["action"]
@@ -162,6 +246,11 @@ class ActionExecutor:
             )
             if succeeded:
                 applied += 1
+                successful_ids.add(action.outlook_id)
+                if item["promotion"] is not None:
+                    promoted += 1
+                elif self.thread_router.action_was_thread_routed(action):
+                    thread_routed += 1
             else:
                 errors.append(f"{action.subject}: {error}")
             self.store.record_action(
@@ -176,18 +265,40 @@ class ActionExecutor:
                 error=error or None,
             )
 
+        self.thread_router.persist_applied(
+            messages=ordered_messages,
+            actions_by_id=actions_by_id,
+            successful_ids=successful_ids,
+            canonical_routes=resolution.canonical_routes,
+            promoted_messages=applied_promotions,
+        )
+
         if errors:
             status = "partial" if applied else "failed"
             error_text = f"{len(errors)} action(s) failed: " + "; ".join(errors[:3])
             self.store.finish_run(run_id, status, error_text)
-            return ExecutionResult(run_id, applied, status, error_text)
+            return ExecutionResult(
+                run_id,
+                applied,
+                status,
+                error_text,
+                promoted=promoted,
+                thread_routed=thread_routed,
+            )
         self.store.finish_run(run_id, "completed")
-        return ExecutionResult(run_id, applied, "completed")
+        return ExecutionResult(
+            run_id,
+            applied,
+            "completed",
+            promoted=promoted,
+            thread_routed=thread_routed,
+        )
 
     def undo_run(self, run_id: str) -> ExecutionResult:
         rows = self.store.run_actions(run_id, reverse=True)
         restored = 0
         undone_ids: list[int] = []
+        restored_thread_members: list[tuple[MailMessage, int]] = []
         try:
             for row in rows:
                 # Outlook mutations are not transactional. A failed action may
@@ -208,7 +319,10 @@ class ActionExecutor:
                 )
                 restored += 1
                 undone_ids.append(int(row["id"]))
+                restored_thread_members.append((current, original_folder_id))
         except Exception as exc:
+            self.thread_router.restore_members(restored_thread_members)
             return ExecutionResult(run_id, restored, "undo_failed", str(exc))
         self.store.mark_run_undone(run_id, undone_ids)
+        self.thread_router.restore_members(restored_thread_members)
         return ExecutionResult(run_id, restored, "undone")

@@ -21,13 +21,14 @@ from outlook_organizer.service import OutlookOrganizerService
 app = typer.Typer(help="Local-first Outlook email organization and calendar analysis")
 config_app = typer.Typer(help="Validate and inspect configuration")
 mail_app = typer.Typer(help="Review, organize, and search Outlook email")
+threads_app = typer.Typer(help="Inspect prospective conversation-thread indexing")
 calendar_app = typer.Typer(help="Inspect and analyze the Outlook calendar")
 history_app = typer.Typer(help="Inspect or undo recorded change history")
 app.add_typer(config_app, name="config")
 app.add_typer(mail_app, name="mail")
+mail_app.add_typer(threads_app, name="threads")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(history_app, name="history")
-app.add_typer(history_app, name="runs", hidden=True)
 
 
 class _ConsoleProgress:
@@ -99,6 +100,44 @@ def _condense_subject(value: object, maximum_length: int = 72) -> str:
     return subject[: maximum_length - 1].rstrip() + "…"
 
 
+def _route_summary_rows(
+    routes: dict[str, int],
+    maximum_width: int,
+) -> list[Text]:
+    entries = [
+        (str(destination), str(count), max(len(str(destination)), len(str(count))))
+        for destination, count in routes.items()
+    ]
+    groups: list[list[tuple[str, str, int]]] = []
+    current: list[tuple[str, str, int]] = []
+    current_width = 0
+    for entry in entries:
+        separator_width = 3 if current else 0
+        projected_width = current_width + separator_width + entry[2]
+        if current and projected_width > maximum_width:
+            groups.append(current)
+            current = []
+            current_width = 0
+            separator_width = 0
+        current.append(entry)
+        current_width += separator_width + entry[2]
+    if current:
+        groups.append(current)
+
+    rows: list[Text] = []
+    for group in groups:
+        labels = Text()
+        counts = Text()
+        for index, (label, count, width) in enumerate(group):
+            if index:
+                labels.append(" │ ", style="bright_black")
+                counts.append(" │ ", style="bright_black")
+            labels.append(label.center(width), style="cyan")
+            counts.append(count.center(width), style="bold")
+        rows.extend([labels, counts])
+    return rows
+
+
 def _print_triage_report(report: dict) -> None:
     console = Console()
     dry_run = bool(report["dry_run"])
@@ -133,8 +172,9 @@ def _print_triage_report(report: dict) -> None:
         status_line.append(f"  ·  {compact_timestamp}", style="dim")
 
     summary_line = Text()
-    summary_line.append(str(summary["messages"]), style="bold cyan")
-    summary_line.append(" messages", style="dim")
+    message_count = int(summary["messages"])
+    summary_line.append(str(message_count), style="bold cyan")
+    summary_line.append(" message" if message_count == 1 else " messages", style="dim")
     summary_line.append("  ·  ", style="bright_black")
     spam_count = summary["possible_spam"]
     summary_line.append(
@@ -142,20 +182,43 @@ def _print_triage_report(report: dict) -> None:
         style="bold red" if spam_count else "bold green",
     )
     summary_line.append(" possible spam", style="dim")
+    thread_routed = (
+        int(execution.get("thread_routed", 0))
+        if execution
+        else int(summary.get("thread_routed", 0))
+    )
+    thread_promotions = (
+        int(execution.get("promoted", 0))
+        if execution
+        else int(summary.get("thread_promotions", 0))
+    )
+    if thread_routed:
+        summary_line.append("  ·  ", style="bright_black")
+        summary_line.append(str(thread_routed), style="bold magenta")
+        summary_line.append(" routed by threading", style="dim")
+    if thread_promotions:
+        summary_line.append("  ·  ", style="bright_black")
+        summary_line.append(str(thread_promotions), style="bold magenta")
+        summary_line.append(
+            (
+                " earlier message promoted"
+                if thread_promotions == 1
+                else " earlier messages promoted"
+            ),
+            style="dim",
+        )
 
-    route_table = Table.grid(padding=(0, 1))
-    route_table.add_column()
-    route_table.add_column(justify="right", style="bold", no_wrap=True)
-    for destination, count in report["action_summary"]["routes"].items():
-        label = "Keep in Inbox" if destination == "Inbox" else f"Move to {destination}"
-        route_table.add_row(Text(label), str(count))
+    route_rows = _route_summary_rows(
+        report["action_summary"]["routes"],
+        maximum_width=max(20, console.width - 6),
+    )
 
     summary_parts: list[object] = [
         status_line,
         summary_line,
-        Text("\nRoutes", style="bold"),
-        route_table,
     ]
+    summary_parts.append(Text("\nRoutes", style="bold"))
+    summary_parts.extend(route_rows)
     category_counts = report["action_summary"]["categories"]
     if category_counts:
         category_text = Text("\nCategories  ", style="bold")
@@ -190,19 +253,30 @@ def _print_triage_report(report: dict) -> None:
         console.rule(section_title, align="left", style="bright_black")
         table = Table.grid(expand=True, padding=(0, 1))
         table.add_column(justify="right", style="dim", no_wrap=True, width=3)
-        table.add_column(ratio=3, overflow="ellipsis", no_wrap=True)
+        table.add_column(ratio=3, max_width=38, overflow="ellipsis", no_wrap=True)
         table.add_column(ratio=5, overflow="ellipsis", no_wrap=True)
-        table.add_column(ratio=2, overflow="ellipsis", no_wrap=True)
-        table.add_column(ratio=2, overflow="ellipsis", no_wrap=True)
+        table.add_column(ratio=3, max_width=38, overflow="fold")
+        table.add_column(
+            ratio=2,
+            max_width=28,
+            overflow="ellipsis",
+            no_wrap=True,
+        )
 
         for item in items:
             sender_address = item["sender_address"] or "Unknown sender"
             destination = (
                 "Keep in Inbox"
                 if item["keep_in_inbox"] or not item["move_to"]
-                else f"Move to {item['move_to']}"
+                else f"→ {item['move_to']}"
             )
             action_style = "cyan" if destination == "Keep in Inbox" else "green"
+            destination_text = Text(destination, style=action_style)
+            if any(
+                rule_id in {"thread-affinity", "thread-priority-promotion"}
+                for rule_id in item.get("matched_rules", [])
+            ):
+                destination_text.append(" · Threading", style="bold magenta")
             categories = Text()
             if item["categories_to_add"]:
                 for category_index, category in enumerate(item["categories_to_add"]):
@@ -215,7 +289,7 @@ def _print_triage_report(report: dict) -> None:
                 str(item["index"]),
                 Text(str(sender_address), style="bold"),
                 Text(_condense_subject(item["subject"])),
-                Text(destination, style=action_style),
+                destination_text,
                 categories,
             )
         console.print(table)
@@ -226,7 +300,6 @@ def _print_triage_report(report: dict) -> None:
     console.print(summary_panel)
 
 
-@app.command("doctor", hidden=True)
 @app.command("check")
 def check() -> None:
     """Check configuration and local Outlook visibility."""
@@ -268,14 +341,12 @@ def config_validate() -> None:
     _print(_service().validate())
 
 
-@app.command("folders", hidden=True)
 @mail_app.command("folders")
 def mail_folders() -> None:
     """List scriptable Outlook mail folders."""
     _print(_service().folders())
 
 
-@mail_app.command("ensure-distilled", hidden=True)
 @mail_app.command("setup")
 def mail_setup(
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
@@ -284,7 +355,6 @@ def mail_setup(
     _print(_service().setup_mail_folders(confirm=confirm))
 
 
-@mail_app.command("digest", hidden=True)
 @mail_app.command("triage")
 def mail_triage(
     limit: Annotated[int, typer.Option(min=1, max=500)] = 50,
@@ -332,11 +402,16 @@ def mail_search(
     _print(_service().search_messages(query, limit=limit, include_body=include_body))
 
 
-@mail_app.command("get", hidden=True)
 @mail_app.command("show")
 def mail_show(outlook_id: int, include_body: bool = False) -> None:
     """Read one Outlook message by its actionable Outlook ID."""
     _print(_service().get_message(outlook_id, include_body=include_body))
+
+
+@threads_app.command("status")
+def mail_threads_status() -> None:
+    """Show whether the authoritative local thread index is ready."""
+    _print(_service().thread_index_status())
 
 
 @history_app.command("list")
@@ -376,7 +451,6 @@ def calendar_agenda(
     )
 
 
-@calendar_app.command("analyze", hidden=True)
 @calendar_app.command("workload")
 def calendar_workload(
     days_ahead: Annotated[int, typer.Option(min=1, max=90)] = 7,

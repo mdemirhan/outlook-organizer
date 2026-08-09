@@ -17,25 +17,27 @@ def test_flagged_rule_creates_action(app_config, direct_message) -> None:
     assert action.matches[0].rule_id == "flagged-needs-action"
 
 
-def test_unknown_external_policy_survives_default_rule(app_config, direct_message) -> None:
-    direct_message.sender_address = "sender@untrusted.example"
+def test_unclassified_external_policy_survives_default_rule(
+    app_config, direct_message
+) -> None:
+    direct_message.sender_address = "sender@unclassified.example"
     planner = MailTriagePlanner(app_config)
     action = planner.create_plan([direct_message], direct_message.folder_id).actions[0]
-    assert "@Untrusted External" in action.add_categories
+    assert "@Unclassified External" in action.add_categories
     assert "@Only Me" in action.add_categories
-    assert action.report_section == "Untrusted External"
+    assert action.report_section == "Unclassified External"
     assert not action.keep_in_inbox
-    assert action.move_to == "untrusted_external"
+    assert action.move_to == "unclassified_external"
 
 
 @pytest.mark.parametrize(
     ("sender_address", "subject"),
     [
-        ("sender@unknown-external.example", "Monthly Newsletter"),
-        ("product-newsletter@unknown-external.example", "Product update"),
+        ("sender@unclassified-external.example", "Monthly Newsletter"),
+        ("product-newsletter@unclassified-external.example", "Product update"),
     ],
 )
-def test_unknown_external_junk_keywords_route_to_junk_external(
+def test_unclassified_external_junk_keywords_route_to_junk_external(
     app_config, direct_message, sender_address, subject
 ) -> None:
     direct_message.sender_address = sender_address
@@ -51,7 +53,9 @@ def test_unknown_external_junk_keywords_route_to_junk_external(
     assert "route-junk-external" in [match.rule_id for match in action.matches]
 
 
-def test_known_junk_sender_routes_to_configured_folder(app_config, direct_message) -> None:
+def test_configured_junk_sender_routes_to_configured_folder(
+    app_config, direct_message
+) -> None:
     direct_message.sender_address = "sender@unwanted.example"
     action = (
         MailTriagePlanner(app_config)
@@ -224,17 +228,8 @@ def test_team_member_routes_to_my_team(app_config, direct_message) -> None:
 
 def test_plan_round_trip(app_config, direct_message) -> None:
     plan = MailTriagePlanner(app_config).create_plan([direct_message], direct_message.folder_id)
+    plan.thread_promotions = 3
     restored = plan_from_dict(plan_to_dict(plan))
     assert restored.plan_id == plan.plan_id
     assert restored.actions[0].outlook_id == direct_message.outlook_id
-
-
-def test_legacy_digest_section_is_still_readable(app_config, direct_message) -> None:
-    plan = MailTriagePlanner(app_config).create_plan([direct_message], direct_message.folder_id)
-    payload = plan_to_dict(plan)
-    action = payload["actions"][0]
-    action["digest_section"] = action.pop("report_section")
-
-    restored = plan_from_dict(payload)
-
-    assert restored.actions[0].report_section == plan.actions[0].report_section
+    assert restored.thread_promotions == 3

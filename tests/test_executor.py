@@ -105,7 +105,7 @@ def test_apply_is_audited_and_undo_restores_state(tmp_path, app_config, direct_m
     assert store.plan_status(plan.plan_id) == "undone"
 
 
-def test_known_junk_uses_cached_junk_external_folder_id(
+def test_configured_junk_uses_cached_junk_external_folder_id(
     tmp_path, app_config, direct_message
 ) -> None:
     direct_message.sender_address = "sender@unwanted.example"

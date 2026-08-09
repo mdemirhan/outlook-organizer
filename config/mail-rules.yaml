@@ -16,6 +16,19 @@
 version: 2
 
 folder_scan_limit: 1000
+
+# Optional conversation-aware filing. When enabled, Outlook's thread GUID is
+# indexed in the local audit SQLite database. A known thread inherits the
+# highest-priority configured destination seen in that conversation, and older
+# managed messages are promoted with it. Flagged Inbox mail, junk mail, and
+# unclassified external mail remain per-message exceptions: they neither
+# inherit nor change the thread route. The index is prospective: existing
+# filed mail is not scanned or backfilled. A SQL miss is authoritative and is
+# treated as a new conversation; the thread is learned after a confirmed run.
+# Manual moves are reconciled only for messages already known to the index.
+threading:
+  enabled: false
+
 folders:
   inbox:
     name: Inbox
@@ -29,8 +42,8 @@ folders:
     name: bOrganized
     id: 103
 
-  untrusted_external:
-    name: Untrusted External
+  unclassified_external:
+    name: Unclassified External
     id: 104
     parent: organized_secondary
 
@@ -133,10 +146,10 @@ routes:
     move_to: company_announcements
     category: "@Company Announcements"
 
-  # Matches: an explicitly junk sender/domain, or otherwise-untrusted external
+  # Matches: an explicitly junk sender/domain, or otherwise-unclassified external
   # mail whose subject or sender address contains a configured junk keyword.
   - id: route-junk-external
-    description: Known junk senders and untrusted external mail with a junk keyword
+    description: Known junk senders and unclassified external mail with a junk keyword
     when:
       sender_type: junk_external
     move_to: junk_external
@@ -151,12 +164,12 @@ routes:
     category: "@Safe External"
 
   # Matches: external sender that is neither safe nor known junk.
-  - id: route-untrusted-external
-    description: Untrusted external mail not classified as safe or known junk
+  - id: route-unclassified-external
+    description: External mail not classified as safe or known junk
     when:
-      sender_type: unknown_external
-    move_to: untrusted_external
-    category: "@Untrusted External"
+      sender_type: unclassified_external
+    move_to: unclassified_external
+    category: "@Unclassified External"
 
   # Broad internal fallback. Keep this after people and distribution routes.
   - id: route-internal-general

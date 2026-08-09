@@ -12,14 +12,6 @@ from outlook_organizer.models import (
 )
 
 
-def _domain_class(value: str) -> DomainClass:
-    legacy = {
-        "known_junk": "junk_external",
-        "untrusted_external": "unknown_external",
-    }
-    return DomainClass(legacy.get(value, value))
-
-
 def plan_to_dict(plan: TriagePlan) -> dict[str, Any]:
     return {
         "plan_id": plan.plan_id,
@@ -27,6 +19,7 @@ def plan_to_dict(plan: TriagePlan) -> dict[str, Any]:
         "config_fingerprint": plan.config_fingerprint,
         "folder_id": plan.folder_id,
         "dry_run": plan.dry_run,
+        "thread_promotions": plan.thread_promotions,
         "actions": [
             {
                 "message_id": action.message_id,
@@ -63,25 +56,23 @@ def plan_from_dict(value: dict[str, Any]) -> TriagePlan:
         created_at=datetime.fromisoformat(value["created_at"]),
         config_fingerprint=value["config_fingerprint"],
         folder_id=int(value["folder_id"]),
-        dry_run=bool(value.get("dry_run", True)),
+        dry_run=bool(value["dry_run"]),
+        thread_promotions=int(value["thread_promotions"]),
         actions=[
             PlannedMessageAction(
                 message_id=action["message_id"],
                 outlook_id=int(action["outlook_id"]),
                 subject=action["subject"],
-                sender_name=action.get("sender_name", ""),
-                sender_address=action.get("sender_address", ""),
-                received_at=action.get("received_at", ""),
+                sender_name=action["sender_name"],
+                sender_address=action["sender_address"],
+                received_at=action["received_at"],
                 add_categories=list(action["add_categories"]),
                 remove_categories=list(action["remove_categories"]),
-                move_to=action.get("move_to"),
-                set_flag=FlagStatus(action["set_flag"]) if action.get("set_flag") else None,
-                report_section=action.get(
-                    "report_section",
-                    action.get("digest_section", "Needs review"),
-                ),
+                move_to=action["move_to"],
+                set_flag=FlagStatus(action["set_flag"]) if action["set_flag"] else None,
+                report_section=action["report_section"],
                 keep_in_inbox=bool(action["keep_in_inbox"]),
-                domain_class=_domain_class(action["domain_class"]),
+                domain_class=DomainClass(action["domain_class"]),
                 matches=[
                     RuleMatch(
                         rule_id=match["rule_id"],

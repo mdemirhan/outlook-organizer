@@ -40,7 +40,7 @@ junk_external:
     - unwanted.example
   addresses:
     - marketing@otherwise-valid.example
-  # Applied only to otherwise-untrusted external mail. Keywords are searched
+  # Applied only to otherwise-unclassified external mail. Keywords are searched
   # case-insensitively in the subject and sender address.
   keywords:
     - newsletter

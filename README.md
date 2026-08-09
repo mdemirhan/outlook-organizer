@@ -10,8 +10,8 @@ model; the project never reads or writes Outlook's internal database.
 - The same command applies its computed actions only with `--apply`.
 - Every applied action records original folder, categories, and flag state.
 - Completed runs can be undone.
-- Untrusted external domains are routed for review. The current rules propose
-  moving them to `Untrusted External`, but only through an explicitly applied
+- Unclassified external domains are routed for review. The current rules propose
+  moving them to `Unclassified External`, but only through an explicitly applied
   triage; deletion is never exposed.
 - Email bodies are not persisted by default.
 - Private calendar event content is redacted from tool results.
@@ -62,6 +62,7 @@ uv run outlook-organizer mail setup --confirm
 
 # Dry-run daily review
 uv run outlook-organizer check
+uv run outlook-organizer mail threads status
 uv run outlook-organizer mail triage --limit 50
 uv run outlook-organizer calendar agenda --days-ahead 7
 uv run outlook-organizer calendar workload --days-ahead 7
@@ -78,7 +79,14 @@ uv run outlook-organizer history undo RUN_ID --confirm
 ```
 
 The triage command uses a terminal-friendly Rich report with a compact summary,
-routing tables, and a clearly marked preview or execution result.
+routing tables, and a clearly marked preview or execution result. Optional
+conversation-aware filing is controlled by `threading.enabled` in
+`mail-rules.yaml`; see the configuration reference for its prospective SQL
+index, priority-promotion behavior, and manual-move semantics. When threading
+affects a run, the main metrics line reports current Inbox messages routed by
+threading and earlier filed messages promoted to the thread's new route. An
+individual destination receives a `· Threading` suffix when threading changed
+that message's ordinary rule destination.
 
 Outlook changes are not transactional. If a run fails after partially changing
 a message, undo that run before running triage again:
@@ -107,7 +115,9 @@ Example requests in Codex:
 
 ## Local audit database
 
-SQLite is used only for confirmed Outlook runs. It records the generated
-actions, run status, and each message's folder/category/flag state before and
-after the change so `history undo` can safely restore it. Dry-run triage reports
-are not stored, and message bodies are never written to this database.
+SQLite records confirmed Outlook actions, run status, and each message's
+folder/category/flag state so `history undo` can safely restore it. When
+threading is enabled, it also stores prospective conversation destinations and
+known message IDs. Dry-run triage reports are not stored, although targeted
+manual-move reconciliation may refresh already-known thread metadata. Message
+bodies are never written to this database.

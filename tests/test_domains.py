@@ -14,7 +14,7 @@ def test_configured_root_and_subdomains_are_internal(app_config) -> None:
     )
     assert (
         classifier.classify("group@sub.corp.invalid").domain_class
-        is DomainClass.UNKNOWN_EXTERNAL
+        is DomainClass.UNCLASSIFIED_EXTERNAL
     )
 
 
@@ -25,7 +25,10 @@ def test_lookalike_domains_are_not_internal(app_config) -> None:
         "person@corp.example.attacker.example",
         "person@notcorp.example",
     ):
-        assert classifier.classify(address).domain_class is DomainClass.UNKNOWN_EXTERNAL
+        assert (
+            classifier.classify(address).domain_class
+            is DomainClass.UNCLASSIFIED_EXTERNAL
+        )
 
 
 def test_boundary_aware_safe_external_match() -> None:
@@ -42,7 +45,7 @@ def test_exact_safe_external_sender_does_not_trust_whole_domain(app_config) -> N
     )
     assert (
         classifier.classify("someone-else@public.example").domain_class
-        is DomainClass.UNKNOWN_EXTERNAL
+        is DomainClass.UNCLASSIFIED_EXTERNAL
     )
 
 
@@ -62,7 +65,7 @@ def test_safe_external_newsletter_is_not_reclassified_as_junk(app_config) -> Non
         "marketing@otherwise-valid.example",
     ],
 )
-def test_configured_junk_domains_and_addresses_are_known_junk(app_config, address) -> None:
+def test_configured_junk_domains_and_addresses_are_junk(app_config, address) -> None:
     classifier = DomainClassifier(app_config.definitions)
     assert classifier.classify(address).domain_class is DomainClass.JUNK_EXTERNAL
 
@@ -75,7 +78,10 @@ def test_configured_junk_domains_and_addresses_are_known_junk(app_config, addres
 )
 def test_exact_junk_sender_does_not_mark_whole_domain_as_junk(app_config, address) -> None:
     classifier = DomainClassifier(app_config.definitions)
-    assert classifier.classify(address).domain_class is DomainClass.UNKNOWN_EXTERNAL
+    assert (
+        classifier.classify(address).domain_class
+        is DomainClass.UNCLASSIFIED_EXTERNAL
+    )
 
 
 def test_extract_domain_normalizes_case_and_invalid_values() -> None:

@@ -74,4 +74,4 @@ class DomainClassifier:
         ):
             return DomainClassification(domain, DomainClass.JUNK_EXTERNAL)
 
-        return DomainClassification(domain, DomainClass.UNKNOWN_EXTERNAL)
+        return DomainClassification(domain, DomainClass.UNCLASSIFIED_EXTERNAL)

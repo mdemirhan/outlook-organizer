@@ -14,6 +14,7 @@ from outlook_organizer.progress import ProgressCallback, format_count, report_pr
 from outlook_organizer.rules import MailTriagePlanner
 from outlook_organizer.serialization import plan_to_dict
 from outlook_organizer.state import StateStore
+from outlook_organizer.threads import ThreadRouter
 
 
 class OutlookOrganizerService:
@@ -27,6 +28,7 @@ class OutlookOrganizerService:
         self.adapter = adapter or OutlookAdapter()
         self.store = store or StateStore()
         self.planner = MailTriagePlanner(self.config)
+        self.thread_router = ThreadRouter(self.config, self.adapter, self.store)
         self.executor = ActionExecutor(self.config, self.adapter, self.store)
 
     def validate(self) -> dict[str, Any]:
@@ -62,6 +64,7 @@ class OutlookOrganizerService:
             "fingerprint": self.config.fingerprint,
             "annotations": len(self.config.mail.annotations),
             "routes": len(self.config.mail.routes),
+            "threading_enabled": self.config.mail.threading.enabled,
             "groups": sorted(configured_groups),
             "distribution_list_groups": sorted(configured_distribution_groups),
             "folders": {
@@ -176,6 +179,7 @@ class OutlookOrganizerService:
         limit: int,
         body_limit: int,
         progress: ProgressCallback | None = None,
+        resolve_threads: bool = True,
     ) -> TriagePlan:
         inbox_id = self.config.mail.folders["inbox"].id
         report_progress(
@@ -187,7 +191,16 @@ class OutlookOrganizerService:
             progress,
             f"Classifying {format_count(len(messages), 'message')}",
         )
-        return self.planner.create_plan(messages, inbox_id)
+        plan = self.planner.create_plan(messages, inbox_id)
+        if resolve_threads:
+            resolution = self.thread_router.resolve(
+                messages,
+                plan.actions,
+                progress=progress,
+            )
+            plan.actions = resolution.actions
+            plan.thread_promotions = len(resolution.promotions)
+        return plan
 
     def triage_mail(
         self,
@@ -201,6 +214,7 @@ class OutlookOrganizerService:
             limit=limit,
             body_limit=body_limit,
             progress=progress,
+            resolve_threads=not confirm,
         )
         execution: dict[str, Any] | None = None
         if confirm:
@@ -242,6 +256,10 @@ class OutlookOrganizerService:
         categories = Counter(
             category for action in plan["actions"] for category in action["add_categories"]
         )
+        proposed_thread_routed = sum(
+            self.thread_router.action_was_thread_routed(action)
+            for action in plan_object.actions
+        )
         return {
             "created_at": plan["created_at"],
             "dry_run": not confirm,
@@ -250,8 +268,19 @@ class OutlookOrganizerService:
                 "proposed_moves": sum(action["move_to"] is not None for action in plan["actions"]),
                 "kept_in_inbox": sum(action["keep_in_inbox"] for action in plan["actions"]),
                 "possible_spam": sum(
-                    action["domain_class"] in {"junk_external", "unknown_external"}
+                    action["domain_class"]
+                    in {"junk_external", "unclassified_external"}
                     for action in plan["actions"]
+                ),
+                "thread_routed": (
+                    int(execution.get("thread_routed", 0))
+                    if execution
+                    else proposed_thread_routed
+                ),
+                "thread_promotions": (
+                    int(execution.get("promoted", 0))
+                    if execution
+                    else int(plan.get("thread_promotions", 0))
                 ),
             },
             "action_summary": {
@@ -261,6 +290,9 @@ class OutlookOrganizerService:
             "sections": sections,
             "execution": execution,
         }
+
+    def thread_index_status(self) -> dict[str, Any]:
+        return self.thread_router.status()
 
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         return plan_to_dict(self.store.load_plan(plan_id))
