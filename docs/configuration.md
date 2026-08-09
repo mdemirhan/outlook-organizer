@@ -287,7 +287,10 @@ are nonzero: current Inbox messages whose destination was changed by thread
 affinity, and earlier filed thread members promoted to a higher-priority
 destination. Confirmed-run counts include only successful Outlook updates. In
 the individual message table, `· Threading` is appended to the destination only
-when threading changed that message's ordinary rule destination.
+when threading changed that message's ordinary rule destination. Confirmed runs
+also list each successfully promoted earlier message in a separate section with
+its original folder, destination, sender, and subject. Dry runs show only the
+promotion count, avoiding an additional full-message read from Outlook.
 
 ### Match conditions
 

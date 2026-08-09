@@ -288,6 +288,11 @@ class OutlookOrganizerService:
                 "categories": dict(categories),
             },
             "sections": sections,
+            # Dry runs remain count-only. Confirmed runs can report the messages
+            # that Outlook actually moved, including accurate partial-run results.
+            "promoted_messages": (
+                list(execution.get("promoted_messages", [])) if execution else []
+            ),
             "execution": execution,
         }
 

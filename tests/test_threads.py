@@ -10,6 +10,7 @@ from outlook_organizer.models import (
     ThreadMessageState,
 )
 from outlook_organizer.rules import MailTriagePlanner
+from outlook_organizer.service import OutlookOrganizerService
 from outlook_organizer.state import StateStore
 from outlook_organizer.threads import ThreadRouter
 
@@ -526,6 +527,11 @@ class ApplyingThreadAdapter(ThreadStateAdapter):
     def get_message(self, outlook_id, body_limit=0):
         return self.messages[outlook_id]
 
+    def latest_messages(self, folder_id, limit=20, body_limit=2000):
+        return [message for message in self.messages.values() if message.folder_id == folder_id][
+            :limit
+        ]
+
     def thread_states_by_ids(self, outlook_ids):
         ids = list(outlook_ids)
         self.requested_ids.append(ids)
@@ -622,6 +628,12 @@ def test_executor_moves_new_reply_and_promotes_historical_member(
     assert result.applied == 2
     assert result.promoted == 1
     assert result.thread_routed == 0
+    assert len(result.promoted_messages) == 1
+    assert result.promoted_messages[0].outlook_id == 41
+    assert result.promoted_messages[0].subject == "Please review"
+    assert result.promoted_messages[0].sender_address == "member@corp.example"
+    assert result.promoted_messages[0].source_folder == "Internal General"
+    assert result.promoted_messages[0].destination_folder == "Leadership"
     assert incoming.folder_id == 106
     assert historical.folder_id == 106
     context = store.thread_contexts("inbox:101", ["execution-thread"])[
@@ -672,6 +684,7 @@ def test_executor_reports_successful_current_messages_routed_by_thread(
     assert result.applied == 2
     assert result.thread_routed == 1
     assert result.promoted == 0
+    assert result.promoted_messages == []
     assert leadership.folder_id == 106
     assert general.folder_id == 106
 
@@ -712,6 +725,7 @@ def test_executor_does_not_promote_flagged_historical_member(
     assert result.status == "completed"
     assert result.applied == 1
     assert result.promoted == 0
+    assert result.promoted_messages == []
     assert incoming.folder_id == 106
     assert historical.folder_id == 110
 
@@ -759,6 +773,99 @@ def test_partial_promotion_failure_keeps_member_retryable(
     assert result.status == "partial"
     assert result.applied == 1
     assert result.promoted == 0
+    assert result.promoted_messages == []
     assert context["folder_key"] == "leadership"
     assert historical_member["folder_key"] == "internal_general"
     assert not historical_member["detached"]
+
+
+def test_confirmed_triage_reports_successful_historical_promotions(
+    app_config, direct_message, tmp_path
+) -> None:
+    config = threaded_config(app_config)
+    historical = message_copy(
+        direct_message,
+        outlook_id=41,
+        exchange_id="exchange-41",
+        folder_id=110,
+        folder_name="Internal General",
+        subject="Earlier conversation message",
+        thread_guid="reported-thread",
+    )
+    incoming = message_copy(
+        direct_message,
+        outlook_id=42,
+        exchange_id="exchange-42",
+        sender_address="leader@corp.example",
+        subject="New leadership reply",
+        thread_guid="reported-thread",
+    )
+    folder_names = {folder.id: folder.name for folder in config.mail.folders.values()}
+    adapter = ApplyingThreadAdapter([historical, incoming], folder_names)
+    store = StateStore(tmp_path / "state.sqlite")
+    seed_thread(
+        store,
+        thread_guid="reported-thread",
+        folder_key="internal_general",
+        members=[(41, 110, "internal_general", False)],
+    )
+
+    result = OutlookOrganizerService(config, adapter, store).triage_mail(
+        limit=1,
+        body_limit=0,
+        confirm=True,
+    )
+
+    assert result["summary"]["messages"] == 1
+    assert result["summary"]["thread_promotions"] == 1
+    assert result["action_summary"]["routes"] == {"Leadership": 1}
+    assert result["promoted_messages"] == [
+        {
+            "outlook_id": 41,
+            "subject": "Earlier conversation message",
+            "sender_name": "Team Member",
+            "sender_address": "member@corp.example",
+            "source_folder": "Internal General",
+            "destination_folder": "Leadership",
+        }
+    ]
+    assert result["execution"]["promoted_messages"] == result["promoted_messages"]
+
+
+def test_dry_run_keeps_historical_promotions_count_only(
+    app_config, direct_message, tmp_path
+) -> None:
+    config = threaded_config(app_config)
+    historical = message_copy(
+        direct_message,
+        outlook_id=41,
+        exchange_id="exchange-41",
+        folder_id=110,
+        folder_name="Internal General",
+        thread_guid="preview-thread",
+    )
+    incoming = message_copy(
+        direct_message,
+        outlook_id=42,
+        exchange_id="exchange-42",
+        sender_address="leader@corp.example",
+        thread_guid="preview-thread",
+    )
+    folder_names = {folder.id: folder.name for folder in config.mail.folders.values()}
+    adapter = ApplyingThreadAdapter([historical, incoming], folder_names)
+    store = StateStore(tmp_path / "state.sqlite")
+    seed_thread(
+        store,
+        thread_guid="preview-thread",
+        folder_key="internal_general",
+        members=[(41, 110, "internal_general", False)],
+    )
+
+    result = OutlookOrganizerService(config, adapter, store).triage_mail(
+        limit=1,
+        body_limit=0,
+    )
+
+    assert result["summary"]["thread_promotions"] == 1
+    assert result["promoted_messages"] == []
+    assert adapter.applied == []

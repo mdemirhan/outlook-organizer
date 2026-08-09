@@ -86,7 +86,9 @@ index, priority-promotion behavior, and manual-move semantics. When threading
 affects a run, the main metrics line reports current Inbox messages routed by
 threading and earlier filed messages promoted to the thread's new route. An
 individual destination receives a `· Threading` suffix when threading changed
-that message's ordinary rule destination.
+that message's ordinary rule destination. After an applied run, successfully
+promoted earlier messages appear in their own compact section with the original
+folder, destination, sender, and subject; dry runs remain count-only.
 
 Outlook changes are not transactional. If a run fails after partially changing
 a message, undo that run before running triage again:

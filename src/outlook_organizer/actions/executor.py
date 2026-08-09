@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from outlook_organizer.config import AppConfig
 from outlook_organizer.models import FlagStatus, MailMessage, TriagePlan
@@ -13,6 +13,16 @@ from outlook_organizer.threads import ThreadPromotion, ThreadRouter
 
 
 @dataclass(slots=True)
+class PromotedMessageReport:
+    outlook_id: int
+    subject: str
+    sender_name: str
+    sender_address: str
+    source_folder: str
+    destination_folder: str
+
+
+@dataclass(slots=True)
 class ExecutionResult:
     run_id: str
     applied: int
@@ -20,6 +30,7 @@ class ExecutionResult:
     error: str | None = None
     promoted: int = 0
     thread_routed: int = 0
+    promoted_messages: list[PromotedMessageReport] = field(default_factory=list)
 
 
 class ActionExecutor:
@@ -233,6 +244,7 @@ class ActionExecutor:
         applied = 0
         promoted = 0
         thread_routed = 0
+        promoted_message_reports: list[PromotedMessageReport] = []
         successful_ids: set[int] = set()
         errors: list[str] = []
         for item in prepared:
@@ -249,6 +261,17 @@ class ActionExecutor:
                 successful_ids.add(action.outlook_id)
                 if item["promotion"] is not None:
                     promoted += 1
+                    message = item["message"]
+                    promoted_message_reports.append(
+                        PromotedMessageReport(
+                            outlook_id=message.outlook_id,
+                            subject=message.subject,
+                            sender_name=message.sender_name,
+                            sender_address=message.sender_address,
+                            source_folder=str(item["before"]["folder_name"]),
+                            destination_folder=str(item["after"]["folder_name"]),
+                        )
+                    )
                 elif self.thread_router.action_was_thread_routed(action):
                     thread_routed += 1
             else:
@@ -284,6 +307,7 @@ class ActionExecutor:
                 error_text,
                 promoted=promoted,
                 thread_routed=thread_routed,
+                promoted_messages=promoted_message_reports,
             )
         self.store.finish_run(run_id, "completed")
         return ExecutionResult(
@@ -292,6 +316,7 @@ class ActionExecutor:
             "completed",
             promoted=promoted,
             thread_routed=thread_routed,
+            promoted_messages=promoted_message_reports,
         )
 
     def undo_run(self, run_id: str) -> ExecutionResult:

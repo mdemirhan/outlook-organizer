@@ -209,6 +209,80 @@ def test_confirmed_execution_status_is_combined_in_footer(capsys, monkeypatch) -
     assert lines[route_index + 2].count("5") == 2
 
 
+def test_successful_historical_promotions_render_in_a_separate_responsive_section(
+    capsys, monkeypatch
+) -> None:
+    monkeypatch.setattr(cli, "Console", lambda: RichConsole(width=88))
+    cli._print_triage_report(
+        {
+            "created_at": "2026-07-30T11:42:05+00:00",
+            "dry_run": False,
+            "summary": {
+                "messages": 1,
+                "proposed_moves": 1,
+                "kept_in_inbox": 0,
+                "possible_spam": 0,
+                "thread_routed": 0,
+                "thread_promotions": 2,
+            },
+            "sections": {
+                "CXO": [
+                    {
+                        "index": 1,
+                        "sender_address": "executive@corp.example",
+                        "subject": "New reply",
+                        "keep_in_inbox": False,
+                        "move_to": "CXO",
+                        "categories_to_add": [],
+                        "matched_rules": [],
+                    }
+                ]
+            },
+            "promoted_messages": [
+                {
+                    "outlook_id": 41,
+                    "sender_name": "Earlier Sender",
+                    "sender_address": "earlier.sender@corp.example",
+                    "subject": "[red]Earlier message[/red]",
+                    "source_folder": "Turkcell General",
+                    "destination_folder": "CXO",
+                },
+                {
+                    "outlook_id": 40,
+                    "sender_name": "Another Sender",
+                    "sender_address": "another.sender@corp.example",
+                    "subject": (
+                        "A long historical conversation subject that still fits responsively"
+                    ),
+                    "source_folder": "My Directs",
+                    "destination_folder": "CXO",
+                },
+            ],
+            "action_summary": {"routes": {"CXO": 1}, "categories": {}},
+            "execution": {
+                "status": "completed",
+                "applied": 3,
+                "run_id": "run-promotions",
+                "error": None,
+                "thread_routed": 0,
+                "promoted": 2,
+            },
+        }
+    )
+
+    output = capsys.readouterr().out
+    normalized_output = " ".join(output.split())
+    assert "Earlier messages promoted by threading 2 messages" in normalized_output
+    assert "earlier.sender@" in output
+    assert "[red]Earlier message[/red]" in normalized_output
+    assert "Turkcell General → CXO" in normalized_output
+    assert "My Directs → CXO" in normalized_output
+    assert "2 earlier messages promoted" in normalized_output
+    assert "No messages found" not in output
+    assert output.index("executive@corp") < output.index("earlier.sender@")
+    assert output.index("earlier.sender@") < output.index("Triage summary")
+
+
 def test_route_summary_wraps_only_between_columns() -> None:
     rows = cli._route_summary_rows(
         {

@@ -143,6 +143,7 @@ def _print_triage_report(report: dict) -> None:
     dry_run = bool(report["dry_run"])
     summary = report["summary"]
     execution = report.get("execution")
+    promoted_messages = report.get("promoted_messages", [])
 
     status_line = Text(overflow="ellipsis", no_wrap=True)
     if dry_run:
@@ -237,7 +238,7 @@ def _print_triage_report(report: dict) -> None:
         padding=(0, 1),
     )
 
-    if not report["sections"]:
+    if not report["sections"] and not promoted_messages:
         console.print(
             Panel(
                 Text("No messages found for this triage.", style="dim", justify="center"),
@@ -295,6 +296,38 @@ def _print_triage_report(report: dict) -> None:
         console.print(table)
         if section_index + 1 < len(section_entries):
             console.print()
+
+    if promoted_messages:
+        if section_entries:
+            console.print()
+        promotion_title = Text("Earlier messages promoted by threading", style="bold magenta")
+        promotion_title.append(f"  {len(promoted_messages)}", style="bold")
+        promotion_title.append(
+            " message" if len(promoted_messages) == 1 else " messages",
+            style="dim",
+        )
+        console.rule(promotion_title, align="left", style="bright_black")
+        promotion_table = Table.grid(expand=True, padding=(0, 1))
+        promotion_table.add_column(justify="right", style="dim", no_wrap=True, width=3)
+        promotion_table.add_column(ratio=4, max_width=44, overflow="fold")
+        promotion_table.add_column(
+            ratio=3,
+            max_width=38,
+            overflow="ellipsis",
+            no_wrap=True,
+        )
+        promotion_table.add_column(ratio=5, overflow="ellipsis", no_wrap=True)
+        for index, item in enumerate(promoted_messages, start=1):
+            route = Text(str(item["source_folder"]), style="dim")
+            route.append(" → ", style="bright_black")
+            route.append(str(item["destination_folder"]), style="green")
+            promotion_table.add_row(
+                str(index),
+                route,
+                Text(str(item.get("sender_address") or "Unknown sender"), style="bold"),
+                Text(_condense_subject(item.get("subject"))),
+            )
+        console.print(promotion_table)
 
     console.print()
     console.print(summary_panel)
