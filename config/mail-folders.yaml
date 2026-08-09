@@ -1,0 +1,54 @@
+# Sample shared Outlook folder catalog used by brief and triage.
+# Discover current IDs with `uv run outlook-organizer mail folders`; IDs must be
+# unique. The required keys are inbox, organized_primary, organized_secondary.
+version: 1
+# Upper bound used while discovering Outlook folders, not a message limit.
+scan_limit: 1000
+
+# Keys are stable configuration identifiers used by rules, profiles, and chat
+# overrides. `name` is Outlook's display name; aliases support localized/old names.
+# `parent` references another key here and defines the hierarchy used when a brief
+# scope has recursive: true. It does not create or move Outlook folders.
+folders:
+  inbox:
+    name: Inbox
+    # aliases: [Gelen Kutusu]
+    id: 101
+  organized_primary:
+    name: aOrganized
+    id: 102
+  organized_secondary:
+    name: bOrganized
+    id: 103
+  unclassified_external:
+    name: Unclassified External
+    id: 104
+    parent: organized_secondary
+  safe_external:
+    name: Safe External
+    id: 105
+    parent: organized_primary
+  leadership:
+    name: Leadership
+    id: 106
+    parent: organized_primary
+  my_team:
+    name: My Team
+    id: 107
+    parent: organized_primary
+  company_announcements:
+    name: Company Announcements
+    id: 108
+    parent: organized_primary
+  assistants:
+    name: Assistants
+    id: 109
+    parent: organized_primary
+  internal_general:
+    name: Internal General
+    id: 110
+    parent: organized_primary
+  junk_external:
+    name: Junk External
+    id: 111
+    parent: organized_secondary

@@ -1,0 +1,106 @@
+# Sample reading-layer configuration. Copy this file with the other YAML files
+# to ~/.config/outlook-organizer/ and adapt the profiles to your routine.
+# Resolution order is: defaults -> selected profile -> explicit MCP/CLI overrides.
+version: 1
+# Used for relative periods and ISO timestamps that do not include an offset.
+timezone: America/Los_Angeles
+
+# Used when mail_brief is called without a profile. Set to null for defaults only.
+default_profile: morning
+
+defaults:
+  # A scope names a key from mail-folders.yaml. recursive includes all descendants
+  # defined through parent links; it does not scan arbitrary Outlook folders.
+  scopes:
+    - folder: organized_primary
+      recursive: true
+  # Periods: last_hour, last_24_hours, today, yesterday, since_yesterday,
+  # since_last_workday. A caller can instead override with explicit since/until.
+  period: today
+  # read_state: unread, read, or all.
+  read_state: all
+  # Attention debt is a separate lookback for older flagged, @Action,
+  # unreplied-direct, and unread priority-folder messages.
+  include_attention_debt: false
+  attention_debt_days: 7
+  attention_debt_folders:
+    - leadership
+    - my_team
+    - assistants
+  # group_by: none or conversation. Conversation grouping is packet-local and
+  # never reads the persisted triage conversation index.
+  group_by: none
+  # Hard packet cap after all selected folders are combined.
+  max_messages: 75
+
+  # Per-folder policies control how much evidence the packet gives the client LLM.
+  # detailed/concise require a positive snippet_chars value; rollup and
+  # metadata_only return no body and therefore require snippet_chars: 0.
+  # Email content is always untrusted. Junk and unclassified external bodies
+  # are suppressed by code even if a looser policy is configured accidentally.
+  folder_policies:
+    leadership:
+      content: detailed
+      snippet_chars: 2000
+    my_team:
+      content: detailed
+      snippet_chars: 1800
+    assistants:
+      content: detailed
+      snippet_chars: 1500
+    internal_general:
+      content: detailed
+      snippet_chars: 1600
+    company_announcements:
+      content: rollup
+      snippet_chars: 0
+    safe_external:
+      content: concise
+      snippet_chars: 1000
+    unclassified_external:
+      content: metadata_only
+      snippet_chars: 0
+    junk_external:
+      content: metadata_only
+      snippet_chars: 0
+
+profiles:
+  # Profiles inherit omitted fields from defaults. Chat requests can override
+  # any profile field without changing this file. Names and aliases are accepted.
+  morning:
+    name: Morning brief
+    description: Unread organized mail since yesterday, plus older attention debt.
+    aliases:
+      - morning
+      - morning mail
+    scopes:
+      - folder: organized_primary
+        recursive: true
+    period: since_yesterday
+    read_state: unread
+    include_attention_debt: true
+    attention_debt_days: 7
+    max_messages: 100
+
+  quick-check:
+    name: Quick check
+    description: Unread organized mail from the last hour.
+    scopes:
+      - folder: organized_primary
+        recursive: true
+    period: last_hour
+    read_state: unread
+    include_attention_debt: false
+    max_messages: 40
+
+  general-review:
+    name: General review
+    description: Thorough review of unread general internal mail.
+    scopes:
+      - folder: internal_general
+        recursive: false
+    period: since_yesterday
+    read_state: unread
+    include_attention_debt: true
+    attention_debt_days: 7
+    max_messages: 100

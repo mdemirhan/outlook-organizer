@@ -1,10 +1,15 @@
-# Sample configuration. Replace these values in ~/.config/outlook-organizer/.
+# Sample calendar-analysis configuration. Replace these values in the live file.
+# Calendar tools are read-only; this file does not create or reschedule meetings.
 version: 1
+# Used to interpret working hours and calculate daily agenda boundaries.
 timezone: America/Los_Angeles
+# Candidate Outlook display names, tried in order for localized calendars.
 calendar_names:
   - Calendar
+# Upper bound used while discovering calendars, not an event limit.
 maximum_calendar_id: 1000
 
+# Days omitted here are treated as non-working days. Times are local to timezone.
 working_hours:
   monday: ["09:00", "18:00"]
   tuesday: ["09:00", "18:00"]
@@ -13,6 +18,8 @@ working_hours:
   friday: ["09:00", "18:00"]
 
 preferences:
+  # Used by workload warnings and free-slot recommendations. These preferences
+  # do not modify Outlook. preferred_focus_windows are preferences, not hard limits.
   lunch_window: ["12:00", "13:30"]
   minimum_focus_block_minutes: 90
   meeting_buffer_minutes: 10
@@ -22,6 +29,8 @@ preferences:
     - ["09:00", "11:00"]
 
 protected_relationships:
+  # Group keys come from mail-definitions.yaml and can be surfaced as priority
+  # meeting relationships by calendar analysis.
   high_priority:
     - leadership
     - my_team

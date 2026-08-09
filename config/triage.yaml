@@ -1,0 +1,105 @@
+# Sample deterministic, CLI-only triage configuration. MCP cannot run triage.
+# Evaluation model:
+# - every matching annotation applies; annotations add context or block moves;
+# - routes run top to bottom and only the first matching route wins;
+# - multiple fields inside one `when` block are combined with AND;
+# - existing Outlook categories are preserved and configured categories are added.
+# Predicates include flagged, recipient, sender_group, sender_type,
+# distribution_list_group, distribution_list, and distribution_delivery.
+version: 1
+
+# When enabled, preview may read an existing prospective conversation index to
+# inherit the highest-priority managed destination. A cold/missing index means a
+# new conversation. Preview never creates, repairs, or writes SQLite; only a
+# confirmed successful triage decision may update the index. There is no backfill
+# or Outlook-wide scan. Keep-in-Inbox, junk, and unclassified-external decisions
+# neither inherit nor establish an ordinary conversation destination.
+threading:
+  enabled: false
+
+# Annotations do not choose a destination. keep_in_inbox overrides any route move.
+annotations:
+  # Flagged messages stay visible even if a route below would otherwise match.
+  - id: flagged-needs-action
+    description: Keep flagged messages visible in the Inbox
+    when:
+      flagged: true
+    section: Needs attention
+    add_category: "@Action"
+    keep_in_inbox: true
+  - id: sent-only-to-me
+    description: Message is addressed only to me
+    when:
+      recipient: only_me
+    add_category: "@Only Me"
+
+routes:
+  # People routes intentionally precede distribution and broad sender-type routes.
+  - id: route-leadership
+    description: Mail from configured leaders
+    when:
+      sender_group: leadership
+    move_to: leadership
+    category: "@Leadership"
+  - id: route-assistants
+    description: Mail from assistants
+    when:
+      sender_group: assistants
+    move_to: assistants
+    category: "@Assistants"
+  - id: route-my-team
+    description: Mail from team members
+    when:
+      sender_group: my_team
+    move_to: my_team
+    category: "@My Team"
+  # Explicit distribution_list_group matches a configured list appearing as
+  # sender, To, or CC. It is the strongest list-routing predicate.
+  - id: route-company-announcements
+    description: Configured company distribution lists
+    when:
+      sender_type: internal
+      distribution_list_group: company_announcements
+    move_to: company_announcements
+    category: "@Company Announcements"
+  # distribution_delivery is conservative: it recognizes the delivery path,
+  # rather than matching a group merely copied on CC.
+  - id: route-other-internal-distribution
+    description: Internal mail delivered through an Outlook-recognized group
+    when:
+      sender_type: internal
+      distribution_delivery: true
+    move_to: company_announcements
+    category: "@Company Announcements"
+  # Safety routes remain per-message exceptions to conversation affinity.
+  - id: route-junk-external
+    description: Known junk senders and unclassified external mail with a junk keyword
+    when:
+      sender_type: junk_external
+    move_to: junk_external
+    category: "@Junk External"
+  - id: route-safe-external
+    description: Mail from an approved external domain or sender
+    when:
+      sender_type: safe_external
+    move_to: safe_external
+    category: "@Safe External"
+  - id: route-unclassified-external
+    description: External mail not classified as safe or known junk
+    when:
+      sender_type: unclassified_external
+    move_to: unclassified_external
+    category: "@Unclassified External"
+  # Broad internal fallback: keep it after people and distribution routes.
+  - id: route-internal-general
+    description: General internal mail
+    when:
+      sender_type: internal
+    move_to: internal_general
+    category: "@Internal General"
+
+# Used only when no route matches, including unknown or unparseable senders.
+default:
+  keep_in_inbox: true
+  category: "@Others"
+  section: Others

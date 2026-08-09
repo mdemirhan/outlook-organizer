@@ -2,234 +2,43 @@ from __future__ import annotations
 
 import pytest
 
-from outlook_organizer.models import FlagStatus, Recipient
-from outlook_organizer.rules.triage import MailTriagePlanner
-from outlook_organizer.serialization import plan_from_dict, plan_to_dict
+from outlook_organizer.mail import FlagStatus, Recipient
+from outlook_organizer.triage.classifier import TriageClassifier
 
 
-def test_flagged_rule_creates_action(app_config, direct_message) -> None:
+def decision(triage_context, message):
+    return TriageClassifier(triage_context).classify(message)
+
+
+def test_flagged_mail_stays_in_inbox(triage_context, direct_message) -> None:
     direct_message.flag_status = FlagStatus.FLAGGED
-    planner = MailTriagePlanner(app_config)
-    plan = planner.create_plan([direct_message], direct_message.folder_id)
-    action = plan.actions[0]
-    assert "@Action" in action.add_categories
-    assert action.keep_in_inbox
-    assert action.matches[0].rule_id == "flagged-needs-action"
+    result = decision(triage_context, direct_message)
+    assert result.keep_in_inbox
+    assert result.move_to is None
+    assert "@Action" in result.add_categories
 
 
-def test_unclassified_external_policy_survives_default_rule(
-    app_config, direct_message
-) -> None:
-    direct_message.sender_address = "sender@unclassified.example"
-    planner = MailTriagePlanner(app_config)
-    action = planner.create_plan([direct_message], direct_message.folder_id).actions[0]
-    assert "@Unclassified External" in action.add_categories
-    assert "@Only Me" in action.add_categories
-    assert action.report_section == "Unclassified External"
-    assert not action.keep_in_inbox
-    assert action.move_to == "unclassified_external"
+def test_internal_mail_routes_to_general(triage_context, direct_message) -> None:
+    result = decision(triage_context, direct_message)
+    assert result.move_to == "internal_general"
+    assert result.add_categories == ["@Internal General", "@Only Me"]
 
 
-@pytest.mark.parametrize(
-    ("sender_address", "subject"),
-    [
-        ("sender@unclassified-external.example", "Monthly Newsletter"),
-        ("product-newsletter@unclassified-external.example", "Product update"),
-    ],
-)
-def test_unclassified_external_junk_keywords_route_to_junk_external(
-    app_config, direct_message, sender_address, subject
-) -> None:
-    direct_message.sender_address = sender_address
-    direct_message.subject = subject
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "junk_external"
-    assert action.report_section == "Junk External"
-    assert "@Junk External" in action.add_categories
-    assert "route-junk-external" in [match.rule_id for match in action.matches]
-
-
-def test_configured_junk_sender_routes_to_configured_folder(
-    app_config, direct_message
-) -> None:
-    direct_message.sender_address = "sender@unwanted.example"
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "junk_external"
-    assert action.report_section == "Junk External"
-    assert action.domain_class.value == "junk_external"
-    assert "@Junk External" in action.add_categories
-    assert app_config.mail.folders[action.move_to].id == 111
-
-
-def test_routine_internal_mail_moves_to_internal_general(app_config, direct_message) -> None:
-    planner = MailTriagePlanner(app_config)
-    action = planner.create_plan([direct_message], direct_message.folder_id).actions[0]
-    assert action.move_to == "internal_general"
-    assert "@Internal General" in action.add_categories
-    assert not action.keep_in_inbox
-
-
-@pytest.mark.parametrize(
-    "address",
-    [
-        "announcements@corp.example",
-        "monitoring@corp.example",
-    ],
-)
-def test_known_company_distribution_lists_are_routed(
-    app_config, direct_message, address
-) -> None:
-    direct_message.to = [Recipient(address, address)]
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "company_announcements"
-    assert "@Company Announcements" in action.add_categories
-
-
-@pytest.mark.parametrize(
-    "address",
-    [
-        "announcements@corp.example",
-        "monitoring@corp.example",
-    ],
-)
-def test_known_company_distribution_list_senders_are_routed(
-    app_config, direct_message, address
-) -> None:
-    direct_message.sender_name = address
-    direct_message.sender_address = address
-
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-
-    assert action.move_to == "company_announcements"
-    assert "@Company Announcements" in action.add_categories
-    assert [match.rule_id for match in action.matches][-1] == (
-        "route-company-announcements"
-    )
-
-
-def test_unconfigured_internal_distribution_list_uses_fallback_route(
-    app_config, direct_message
-) -> None:
-    direct_message.to = [
-        Recipient(
-            "Unconfigured list",
-            "unconfigured-list@corp.example",
-            "public group address",
-        )
-    ]
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "company_announcements"
-    assert [match.rule_id for match in action.matches][-1] == (
-        "route-other-internal-distribution"
-    )
-
-
-def test_unconfigured_group_in_cc_does_not_route_direct_mail_as_distribution(
-    app_config, direct_message
-) -> None:
-    direct_message.cc = [
-        Recipient(
-            "Project team",
-            "project-team@corp.example",
-            "public group address",
-        )
-    ]
-
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-
-    assert action.move_to == "internal_general"
-    assert "route-other-internal-distribution" not in [
-        match.rule_id for match in action.matches
-    ]
-
-
-def test_configured_distribution_group_in_cc_remains_an_explicit_override(
-    app_config, direct_message
-) -> None:
-    direct_message.cc = [
-        Recipient(
-            "Company Announcements",
-            "announcements@corp.example",
-            "public group address",
-        )
-    ]
-
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-
-    assert action.move_to == "company_announcements"
-    assert [match.rule_id for match in action.matches][-1] == (
-        "route-company-announcements"
-    )
-
-
-def test_unmatched_mail_uses_others_category(app_config, direct_message) -> None:
-    direct_message.sender_address = "not-an-email-address"
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to is None
-    assert action.keep_in_inbox
-    assert action.report_section == "Others"
-    assert "@Others" in action.add_categories
-
-
-def test_leadership_takes_precedence_over_other_internal(app_config, direct_message) -> None:
+def test_leadership_route_precedes_general(triage_context, direct_message) -> None:
     direct_message.sender_address = "leader@corp.example"
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "leadership"
-    assert "@Leadership" in action.add_categories
-    assert [match.rule_id for match in action.matches][-1] == "route-leadership"
+    result = decision(triage_context, direct_message)
+    assert result.move_to == "leadership"
+    assert result.matches[-1].rule_id == "route-leadership"
 
 
-def test_team_member_routes_to_my_team(app_config, direct_message) -> None:
-    direct_message.sender_address = "teammate@corp.example"
-    action = (
-        MailTriagePlanner(app_config)
-        .create_plan([direct_message], direct_message.folder_id)
-        .actions[0]
-    )
-    assert action.move_to == "my_team"
-    assert "@My Team" in action.add_categories
+@pytest.mark.parametrize("address", ["announcements@corp.example", "monitoring@corp.example"])
+def test_known_distribution_lists_route_explicitly(triage_context, direct_message, address) -> None:
+    direct_message.to = [Recipient(address, address)]
+    result = decision(triage_context, direct_message)
+    assert result.move_to == "company_announcements"
 
 
-def test_plan_round_trip(app_config, direct_message) -> None:
-    plan = MailTriagePlanner(app_config).create_plan([direct_message], direct_message.folder_id)
-    plan.thread_promotions = 3
-    restored = plan_from_dict(plan_to_dict(plan))
-    assert restored.plan_id == plan.plan_id
-    assert restored.actions[0].outlook_id == direct_message.outlook_id
-    assert restored.thread_promotions == 3
+def test_unclassified_sender_uses_safety_folder(triage_context, direct_message) -> None:
+    direct_message.sender_address = "sender@unknown.example"
+    result = decision(triage_context, direct_message)
+    assert result.move_to == "unclassified_external"

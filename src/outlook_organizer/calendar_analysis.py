@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from outlook_organizer.models import CalendarEvent
+from outlook_organizer.calendar.models import CalendarEvent
 
 OUTLOOK_DATE_FORMATS = (
     "%Y-%m-%dT%H:%M:%S",

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date, time
 
+from outlook_organizer.calendar import CalendarEvent
 from outlook_organizer.calendar_analysis import analyze_calendar, find_free_slots
-from outlook_organizer.models import CalendarEvent
 
 
 def event(subject: str, start: str, end: str) -> CalendarEvent:

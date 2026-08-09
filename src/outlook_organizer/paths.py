@@ -14,6 +14,4 @@ def config_dir() -> Path:
 
 def state_dir() -> Path:
     value = os.environ.get("OUTLOOK_ORGANIZER_STATE")
-    path = Path(value).expanduser().resolve() if value else PROJECT_ROOT / "state"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return Path(value).expanduser().resolve() if value else PROJECT_ROOT / "state"

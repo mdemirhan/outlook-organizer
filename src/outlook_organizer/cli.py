@@ -14,19 +14,32 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 
+from outlook_organizer.bootstrap import (
+    folder_admin_service,
+    history_service,
+    triage_apply_service,
+    triage_preview_service,
+    validate_configuration,
+)
+from outlook_organizer.brief import MailBriefService
+from outlook_organizer.calendar import CalendarService
+from outlook_organizer.mail.service import FolderAdminService, MailReadService
 from outlook_organizer.mcp_server import run_mcp
 from outlook_organizer.outlook import OutlookError
-from outlook_organizer.service import OutlookOrganizerService
+from outlook_organizer.read_bootstrap import (
+    brief_service,
+    calendar_service,
+    mail_read_service,
+)
+from outlook_organizer.triage import ApplyTriageService, TriagePreviewService
 
 app = typer.Typer(help="Local-first Outlook email organization and calendar analysis")
 config_app = typer.Typer(help="Validate and inspect configuration")
 mail_app = typer.Typer(help="Review, organize, and search Outlook email")
-threads_app = typer.Typer(help="Inspect prospective conversation-thread indexing")
 calendar_app = typer.Typer(help="Inspect and analyze the Outlook calendar")
 history_app = typer.Typer(help="Inspect or undo recorded change history")
 app.add_typer(config_app, name="config")
 app.add_typer(mail_app, name="mail")
-mail_app.add_typer(threads_app, name="threads")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(history_app, name="history")
 
@@ -85,9 +98,49 @@ def _print(value: object) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
-def _service() -> OutlookOrganizerService:
+def _mail_service() -> MailReadService:
     try:
-        return OutlookOrganizerService()
+        return mail_read_service()
+    except Exception as exc:
+        typer.echo(f"Configuration error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+def _brief_service() -> MailBriefService:
+    try:
+        return brief_service()
+    except Exception as exc:
+        typer.echo(f"Configuration error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+def _calendar_service() -> CalendarService:
+    try:
+        return calendar_service()
+    except Exception as exc:
+        typer.echo(f"Configuration error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+def _folder_admin_service() -> FolderAdminService:
+    try:
+        return folder_admin_service()
+    except Exception as exc:
+        typer.echo(f"Configuration error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+def _triage_preview_service() -> TriagePreviewService:
+    try:
+        return triage_preview_service()
+    except Exception as exc:
+        typer.echo(f"Configuration error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+def _triage_apply_service() -> ApplyTriageService:
+    try:
+        return triage_apply_service()
     except Exception as exc:
         typer.echo(f"Configuration error: {exc}", err=True)
         raise typer.Exit(2) from exc
@@ -143,7 +196,6 @@ def _print_triage_report(report: dict) -> None:
     dry_run = bool(report["dry_run"])
     summary = report["summary"]
     execution = report.get("execution")
-    promoted_messages = report.get("promoted_messages", [])
 
     status_line = Text(overflow="ellipsis", no_wrap=True)
     if dry_run:
@@ -188,26 +240,10 @@ def _print_triage_report(report: dict) -> None:
         if execution
         else int(summary.get("thread_routed", 0))
     )
-    thread_promotions = (
-        int(execution.get("promoted", 0))
-        if execution
-        else int(summary.get("thread_promotions", 0))
-    )
     if thread_routed:
         summary_line.append("  ·  ", style="bright_black")
         summary_line.append(str(thread_routed), style="bold magenta")
         summary_line.append(" routed by threading", style="dim")
-    if thread_promotions:
-        summary_line.append("  ·  ", style="bright_black")
-        summary_line.append(str(thread_promotions), style="bold magenta")
-        summary_line.append(
-            (
-                " earlier message promoted"
-                if thread_promotions == 1
-                else " earlier messages promoted"
-            ),
-            style="dim",
-        )
 
     route_rows = _route_summary_rows(
         report["action_summary"]["routes"],
@@ -238,7 +274,7 @@ def _print_triage_report(report: dict) -> None:
         padding=(0, 1),
     )
 
-    if not report["sections"] and not promoted_messages:
+    if not report["sections"]:
         console.print(
             Panel(
                 Text("No messages found for this triage.", style="dim", justify="center"),
@@ -297,38 +333,6 @@ def _print_triage_report(report: dict) -> None:
         if section_index + 1 < len(section_entries):
             console.print()
 
-    if promoted_messages:
-        if section_entries:
-            console.print()
-        promotion_title = Text("Earlier messages promoted by threading", style="bold magenta")
-        promotion_title.append(f"  {len(promoted_messages)}", style="bold")
-        promotion_title.append(
-            " message" if len(promoted_messages) == 1 else " messages",
-            style="dim",
-        )
-        console.rule(promotion_title, align="left", style="bright_black")
-        promotion_table = Table.grid(expand=True, padding=(0, 1))
-        promotion_table.add_column(justify="right", style="dim", no_wrap=True, width=3)
-        promotion_table.add_column(ratio=4, max_width=44, overflow="fold")
-        promotion_table.add_column(
-            ratio=3,
-            max_width=38,
-            overflow="ellipsis",
-            no_wrap=True,
-        )
-        promotion_table.add_column(ratio=5, overflow="ellipsis", no_wrap=True)
-        for index, item in enumerate(promoted_messages, start=1):
-            route = Text(str(item["source_folder"]), style="dim")
-            route.append(" → ", style="bright_black")
-            route.append(str(item["destination_folder"]), style="green")
-            promotion_table.add_row(
-                str(index),
-                route,
-                Text(str(item.get("sender_address") or "Unknown sender"), style="bold"),
-                Text(_condense_subject(item.get("subject"))),
-            )
-        console.print(promotion_table)
-
     console.print()
     console.print(summary_panel)
 
@@ -336,21 +340,22 @@ def _print_triage_report(report: dict) -> None:
 @app.command("check")
 def check() -> None:
     """Check configuration and local Outlook visibility."""
-    service = _service()
+    service = _mail_service()
+    calendar = _calendar_service()
     result: dict[str, object] = {
         "platform": platform.platform(),
-        "config": service.validate(),
+        "config": validate_configuration(),
         "outlook_app_exists": Path("/Applications/Microsoft Outlook.app").exists(),
     }
     try:
-        inbox_config = service.config.mail.folders["inbox"]
-        inbox = service.adapter.find_folder(
+        inbox_config = service.context.folders.folders["inbox"]
+        inbox = service.reader.find_folder(
             inbox_config.names,
-            service.config.mail.folder_scan_limit,
+            service.context.folders.scan_limit,
         )
-        calendar = service.adapter.find_calendar(
-            service.config.calendar.calendar_names,
-            service.config.calendar.maximum_calendar_id,
+        calendar_info = calendar.reader.find_calendar(
+            calendar.config.calendar_names,
+            calendar.config.maximum_calendar_id,
         )
         result["inbox"] = {
             "id": inbox.outlook_id,
@@ -359,9 +364,9 @@ def check() -> None:
         }
         result["configured_folders"] = service.configured_folder_status()
         result["calendar"] = {
-            "id": calendar.outlook_id,
-            "name": calendar.name,
-            "event_count": calendar.event_count,
+            "id": calendar_info.outlook_id,
+            "name": calendar_info.name,
+            "event_count": calendar_info.event_count,
         }
     except OutlookError as exc:
         result["outlook_error"] = str(exc)
@@ -371,13 +376,13 @@ def check() -> None:
 @config_app.command("validate")
 def config_validate() -> None:
     """Validate YAML configuration and rule predicates."""
-    _print(_service().validate())
+    _print(validate_configuration())
 
 
 @mail_app.command("folders")
 def mail_folders() -> None:
     """List scriptable Outlook mail folders."""
-    _print(_service().folders())
+    _print(_mail_service().folders())
 
 
 @mail_app.command("setup")
@@ -385,7 +390,7 @@ def mail_setup(
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
 ) -> None:
     """Ensure the configured mail root folders exist. Requires --confirm."""
-    _print(_service().setup_mail_folders(confirm=confirm))
+    _print(_folder_admin_service().setup(confirm=confirm))
 
 
 @mail_app.command("triage")
@@ -404,14 +409,20 @@ def mail_triage(
     """Preview mail triage, or apply it immediately with --apply."""
     with _ConsoleProgress(enabled=progress) as progress_view:
         progress_view.update("Loading configuration")
-        report = _service().triage_mail(
-            limit=limit,
-            body_limit=body_limit,
-            confirm=apply,
-            progress=progress_view.update,
-        )
+        if apply:
+            report = _triage_apply_service().apply(
+                limit=limit,
+                body_limit=body_limit,
+                progress=progress_view.update,
+            )
+        else:
+            report = _triage_preview_service().preview(
+                limit=limit,
+                body_limit=body_limit,
+                progress=progress_view.update,
+            )
         execution = report.get("execution")
-        succeeded = execution is None or execution["status"] == "completed"
+        succeeded = execution is None or execution["status"] in {"completed", "no_changes"}
         if execution is None:
             completion = "Triage ready — no Outlook changes"
         else:
@@ -421,7 +432,7 @@ def mail_triage(
         progress_view.finish(completion, success=succeeded)
 
     _print_triage_report(report)
-    if execution and execution["status"] != "completed":
+    if execution and execution["status"] not in {"completed", "no_changes"}:
         raise typer.Exit(1)
 
 
@@ -432,25 +443,69 @@ def mail_search(
     include_body: bool = False,
 ) -> None:
     """Search recent Inbox messages."""
-    _print(_service().search_messages(query, limit=limit, include_body=include_body))
+    _print(_mail_service().search_messages(query, limit=limit, include_body=include_body))
+
+
+@mail_app.command("brief")
+def mail_brief(
+    profile: str | None = None,
+    folder: Annotated[list[str] | None, typer.Option("--folder")] = None,
+    additional_folder: Annotated[list[str] | None, typer.Option("--additional-folder")] = None,
+    exclude_folder: Annotated[list[str] | None, typer.Option("--exclude-folder")] = None,
+    recursive: Annotated[
+        bool | None,
+        typer.Option("--recursive/--no-recursive"),
+    ] = None,
+    period: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    read_state: Annotated[str | None, typer.Option("--read-state")] = None,
+    attention_debt: Annotated[
+        bool | None,
+        typer.Option("--attention-debt/--no-attention-debt"),
+    ] = None,
+    attention_debt_days: Annotated[int | None, typer.Option(min=1, max=90)] = None,
+    group_by: Annotated[str | None, typer.Option("--group-by")] = None,
+    max_messages: Annotated[int | None, typer.Option(min=1, max=500)] = None,
+    cursor: str | None = None,
+) -> None:
+    """Emit the same ephemeral JSON packet exposed to LLM clients through MCP."""
+    _print(
+        _brief_service().brief(
+            profile=profile,
+            folder_keys=folder,
+            additional_folder_keys=additional_folder,
+            exclude_folder_keys=exclude_folder,
+            include_subfolders=recursive,
+            period=period,
+            since=since,
+            until=until,
+            read_state=read_state,
+            include_attention_debt=attention_debt,
+            attention_debt_days=attention_debt_days,
+            group_by=group_by,
+            max_messages=max_messages,
+            cursor=cursor,
+        )
+    )
+
+
+@mail_app.command("brief-profiles")
+def mail_brief_profiles() -> None:
+    """List configured brief profiles and effective defaults."""
+    _print(_brief_service().list_profiles())
 
 
 @mail_app.command("show")
 def mail_show(outlook_id: int, include_body: bool = False) -> None:
     """Read one Outlook message by its actionable Outlook ID."""
-    _print(_service().get_message(outlook_id, include_body=include_body))
-
-
-@threads_app.command("status")
-def mail_threads_status() -> None:
-    """Show whether the authoritative local thread index is ready."""
-    _print(_service().thread_index_status())
+    _print(_mail_service().get_message(outlook_id, include_body=include_body))
 
 
 @history_app.command("list")
 def history_list(limit: Annotated[int, typer.Option(min=1, max=100)] = 20) -> None:
     """List recent applied runs and their status."""
-    _print(_service().recent_runs(limit))
+    _print(history_service().list_runs(limit))
 
 
 @history_app.command("undo")
@@ -459,13 +514,13 @@ def history_undo(
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
 ) -> None:
     """Undo a completed email run. Requires --confirm."""
-    _print(_service().undo_run(run_id, confirm=confirm))
+    _print(history_service().undo(run_id, confirm=confirm))
 
 
 @calendar_app.command("list")
 def calendar_list() -> None:
     """List scriptable Outlook calendars."""
-    _print(_service().calendars())
+    _print(_calendar_service().calendars())
 
 
 @calendar_app.command("agenda")
@@ -476,7 +531,7 @@ def calendar_agenda(
 ) -> None:
     """Show calendar events around today."""
     _print(
-        _service().calendar_events(
+        _calendar_service().events(
             days_ahead=days_ahead,
             days_behind=days_behind,
             include_body=include_body,
@@ -490,7 +545,7 @@ def calendar_workload(
     days_behind: Annotated[int, typer.Option(min=0, max=30)] = 0,
 ) -> None:
     """Summarize meeting hours, conflicts, and back-to-back meetings."""
-    _print(_service().analyze_calendar(days_ahead=days_ahead, days_behind=days_behind))
+    _print(_calendar_service().analyze(days_ahead=days_ahead, days_behind=days_behind))
 
 
 @calendar_app.command("free-slots")
@@ -503,7 +558,7 @@ def calendar_free_slots(
         parsed_date = date.fromisoformat(target_date)
     except ValueError as exc:
         raise typer.BadParameter("target_date must use YYYY-MM-DD") from exc
-    _print(_service().find_free_slots(parsed_date, minimum_minutes=minimum_minutes))
+    _print(_calendar_service().free_slots(parsed_date, minimum_minutes=minimum_minutes))
 
 
 @app.command("mcp")

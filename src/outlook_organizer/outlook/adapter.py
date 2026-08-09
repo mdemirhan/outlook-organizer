@@ -3,15 +3,16 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from outlook_organizer.models import (
+from outlook_organizer.calendar.models import (
     CalendarAttendee,
     CalendarEvent,
     CalendarInfo,
+)
+from outlook_organizer.mail.models import (
     FlagStatus,
     MailMessage,
     OutlookFolder,
     Recipient,
-    ThreadMessageState,
 )
 from outlook_organizer.outlook.applescript import AppleScriptRunner, OutlookError
 from outlook_organizer.outlook.scripts import (
@@ -24,7 +25,7 @@ from outlook_organizer.outlook.scripts import (
     READ_MESSAGE_BY_ID,
     READ_MESSAGES_BY_IDS,
     READ_MESSAGES_IN_FOLDER_ORDER,
-    READ_THREAD_STATES_BY_IDS,
+    READ_MESSAGES_IN_FOLDER_WINDOW,
 )
 
 RS = "\x1e"
@@ -159,6 +160,33 @@ class OutlookAdapter:
         )
         return self._parse_messages(result.stdout)
 
+    def messages_in_window(
+        self,
+        folder_id: int,
+        *,
+        start_offset_seconds: int,
+        end_offset_seconds: int,
+        read_state: str,
+        limit: int,
+        body_limit: int = 0,
+    ) -> list[MailMessage]:
+        if read_state not in {"unread", "read", "all"}:
+            raise ValueError(f"Unsupported read state: {read_state}")
+        result = self.runner.run(
+            READ_MESSAGES_IN_FOLDER_WINDOW,
+            str(folder_id),
+            str(start_offset_seconds),
+            str(end_offset_seconds),
+            read_state,
+            str(limit),
+            str(body_limit),
+        )
+        return sorted(
+            self._parse_messages(result.stdout),
+            key=lambda message: (message.received_at, message.outlook_id),
+            reverse=True,
+        )
+
     def _parse_messages(self, output: str) -> list[MailMessage]:
         if not output.strip():
             return []
@@ -184,40 +212,11 @@ class OutlookAdapter:
                     body=fields[12],
                     has_attachments=_bool(fields[13]),
                     thread_guid=fields[14].strip() if len(fields) > 14 else "",
+                    is_read=_bool(fields[15]) if len(fields) > 15 else True,
+                    replied_to=_bool(fields[16]) if len(fields) > 16 else False,
                 )
             )
         return messages
-
-    def thread_states_by_ids(
-        self, outlook_ids: Iterable[int]
-    ) -> list[ThreadMessageState]:
-        ids = [int(value) for value in outlook_ids]
-        if not ids:
-            return []
-        result = self.runner.run(
-            READ_THREAD_STATES_BY_IDS,
-            *(str(value) for value in ids),
-        )
-        return self._parse_thread_states(result.stdout)
-
-    def _parse_thread_states(self, output: str) -> list[ThreadMessageState]:
-        states: list[ThreadMessageState] = []
-        for row in filter(None, output.split(RS)):
-            fields = row.split(US)
-            if len(fields) < 5:
-                raise OutlookError(
-                    f"Unexpected Outlook thread-state response with {len(fields)} fields"
-                )
-            states.append(
-                ThreadMessageState(
-                    outlook_id=int(fields[0]),
-                    exchange_id=fields[1],
-                    folder_id=int(fields[2]),
-                    folder_name=fields[3],
-                    thread_guid=fields[4].strip(),
-                )
-            )
-        return states
 
     def calendar_events(
         self,

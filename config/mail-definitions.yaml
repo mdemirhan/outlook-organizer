@@ -1,16 +1,23 @@
 # Sample configuration. Copy all files in this directory to
 # ~/.config/outlook-organizer/ and replace these example values.
+# Shared by triage, brief facts, and calendar relationship labels. Addresses are
+# case-insensitive. Domains include subdomains on DNS boundaries.
 version: 2
 
+# All personal aliases that mean "me" for recipient/directness classification.
 identity:
   name: Example User
   addresses:
     - example.user@corp.example
     - example.alias@corp.example
 
+# Sender classification precedence is: internal, explicit junk, safe external,
+# junk keyword, then unclassified external. Invalid addresses remain unknown.
 internal_domains:
   - corp.example
 
+# Named people groups used by sender_group predicates and priority reporting.
+# One address may belong to only one people group.
 groups:
   leadership:
     - leader@corp.example
@@ -19,6 +26,7 @@ groups:
   assistants:
     - assistant@corp.example
 
+# Domains trust the whole domain and its subdomains; addresses trust one sender.
 safe_external:
   domains:
     - trusted-partner.example
@@ -26,7 +34,7 @@ safe_external:
     # Trust this sender without trusting every public.example sender.
     - trusted.sender@public.example
 
-# Named list addresses used by the mail-rule `distribution_list_group` predicate.
+# Named list addresses used by the triage `distribution_list_group` predicate.
 # Configuration also lets list senders be recognized when Outlook does not expose
 # a group type. Merely listing an address here does not select a destination.
 distribution_list_groups:
@@ -34,6 +42,7 @@ distribution_list_groups:
     - announcements@corp.example
     - monitoring@corp.example
 
+# Explicit junk is evaluated before keyword-based junk classification.
 junk_external:
   # Domains include their subdomains.
   domains:

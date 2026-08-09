@@ -4,13 +4,32 @@ from pathlib import Path
 
 import pytest
 
-from outlook_organizer.config import AppConfig, load_config
-from outlook_organizer.models import FlagStatus, MailMessage, Recipient
+from outlook_organizer.brief import BriefContext, load_brief_context
+from outlook_organizer.mail import (
+    FlagStatus,
+    MailContext,
+    MailMessage,
+    Recipient,
+    load_mail_context,
+)
+from outlook_organizer.triage import TriageContext, load_triage_context
+
+CONFIG = Path(__file__).resolve().parents[1] / "config"
 
 
 @pytest.fixture
-def app_config() -> AppConfig:
-    return load_config(Path(__file__).resolve().parents[1] / "config")
+def mail_context() -> MailContext:
+    return load_mail_context(CONFIG)
+
+
+@pytest.fixture
+def triage_context() -> TriageContext:
+    return load_triage_context(CONFIG)
+
+
+@pytest.fixture
+def brief_context() -> BriefContext:
+    return load_brief_context(CONFIG)
 
 
 @pytest.fixture
