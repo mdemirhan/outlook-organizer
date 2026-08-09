@@ -338,7 +338,7 @@ def test_message_manually_moved_outside_managed_tree_is_not_pulled_back(
     assert resolution.promotions == []
 
 
-def test_reused_outlook_id_with_different_exchange_identity_is_detached(
+def test_outlook_id_resolving_to_another_thread_is_detached(
     app_config, direct_message, tmp_path
 ) -> None:
     config = threaded_config(app_config)
@@ -361,6 +361,99 @@ def test_reused_outlook_id_with_different_exchange_identity_is_detached(
     ]["members"][0]
 
     assert member["detached"]
+
+
+def test_changed_exchange_id_in_same_thread_refreshes_without_detaching(
+    app_config, direct_message, tmp_path
+) -> None:
+    config = threaded_config(app_config)
+    store = StateStore(tmp_path / "state.sqlite")
+    seed_thread(
+        store,
+        thread_guid="stable-thread",
+        folder_key="internal_general",
+        members=[(41, 110, "internal_general", False)],
+    )
+    adapter = ThreadStateAdapter(
+        [
+            ThreadMessageState(
+                41,
+                "exchange-after-folder-move",
+                110,
+                "Internal General",
+                "stable-thread",
+            )
+        ]
+    )
+    direct_message.thread_guid = "stable-thread"
+    router = ThreadRouter(config, adapter, store)
+
+    router.resolve([direct_message], plan_actions(config, [direct_message]))
+    member = store.thread_contexts(router.scope, ["stable-thread"])["stable-thread"][
+        "members"
+    ][0]
+
+    assert member["message_id"] == "exchange-after-folder-move"
+    assert not member["detached"]
+
+
+def test_higher_priority_reply_repromotes_manually_moved_thread_with_new_exchange_ids(
+    app_config, direct_message, tmp_path
+) -> None:
+    config = threaded_config(app_config)
+    store = StateStore(tmp_path / "state.sqlite")
+    seed_thread(
+        store,
+        thread_guid="revisit-thread",
+        folder_key="leadership",
+        members=[
+            (41, 106, "leadership", False),
+            (42, 106, "leadership", False),
+            (43, 106, "leadership", False),
+        ],
+    )
+    adapter = ThreadStateAdapter(
+        [
+            ThreadMessageState(
+                outlook_id,
+                f"moved-exchange-{outlook_id}",
+                110,
+                "Internal General",
+                "revisit-thread",
+            )
+            for outlook_id in (41, 42, 43)
+        ]
+    )
+    incoming = message_copy(
+        direct_message,
+        outlook_id=44,
+        exchange_id="exchange-44",
+        sender_address="leader@corp.example",
+        thread_guid="revisit-thread",
+    )
+
+    resolution = ThreadRouter(config, adapter, store).resolve(
+        [incoming],
+        plan_actions(config, [incoming]),
+    )
+    context = store.thread_contexts("inbox:101", ["revisit-thread"])[
+        "revisit-thread"
+    ]
+
+    assert resolution.actions[0].move_to == "leadership"
+    assert {
+        (promotion.outlook_id, promotion.destination_key)
+        for promotion in resolution.promotions
+    } == {
+        (41, "leadership"),
+        (42, "leadership"),
+        (43, "leadership"),
+    }
+    assert {member["message_id"] for member in context["members"]} == {
+        "moved-exchange-41",
+        "moved-exchange-42",
+        "moved-exchange-43",
+    }
 
 
 def test_safety_and_flagged_messages_do_not_inherit_thread_destination(

@@ -183,7 +183,7 @@ class OutlookAdapter:
                     categories=[value for value in fields[11].split(GS) if value],
                     body=fields[12],
                     has_attachments=_bool(fields[13]),
-                    thread_guid=fields[14] if len(fields) > 14 else "",
+                    thread_guid=fields[14].strip() if len(fields) > 14 else "",
                 )
             )
         return messages
@@ -214,7 +214,7 @@ class OutlookAdapter:
                     exchange_id=fields[1],
                     folder_id=int(fields[2]),
                     folder_name=fields[3],
-                    thread_guid=fields[4],
+                    thread_guid=fields[4].strip(),
                 )
             )
         return states

@@ -247,8 +247,10 @@ For SQL-known conversations, the organizer validates only the recorded Outlook
 message IDs. If every known member was manually moved to the same configured
 route folder, that folder becomes the new conversation destination. A single
 manually moved member becomes a detached exception and is not moved back.
-Messages no longer found in Outlook, messages whose Outlook ID was reused, and
-messages moved outside the configured tree are also detached safely.
+Messages no longer found in Outlook, Outlook IDs that now resolve to another
+thread, and messages moved outside the configured tree are also detached
+safely. Exchange IDs are refreshed rather than treated as immutable because
+Outlook changes them when messages move between folders.
 
 #### Junk and unclassified messages in known threads
 

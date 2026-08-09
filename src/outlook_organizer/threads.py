@@ -312,7 +312,7 @@ class ThreadRouter:
     ) -> None:
         state_by_id = {state.outlook_id: state for state in states}
         route_updates: dict[str, str] = {}
-        member_updates: list[dict[str, Any]] = []
+        member_updates: dict[tuple[str, int], dict[str, Any]] = {}
         for thread_guid, context in contexts.items():
             active = [
                 member
@@ -327,10 +327,18 @@ class ThreadRouter:
                 if member["outlook_id"] in state_by_id
                 and self._state_matches_member(
                     state_by_id[member["outlook_id"]],
-                    member,
                     thread_guid=thread_guid,
                 )
             }
+            for member in active:
+                state = valid_state_by_id.get(member["outlook_id"])
+                if (
+                    state is not None
+                    and state.exchange_id
+                    and state.exchange_id != member["message_id"]
+                ):
+                    member["message_id"] = state.exchange_id
+                    member_updates[(thread_guid, member["outlook_id"])] = member
             found = list(valid_state_by_id.values())
             changed = [
                 member
@@ -357,45 +365,39 @@ class ThreadRouter:
                 for member in active:
                     state = valid_state_by_id[member["outlook_id"]]
                     member.update(
+                        message_id=state.exchange_id or member["message_id"],
                         folder_id=state.folder_id,
                         folder_key=destination,
                         detached=destination in self.safety_folder_keys,
                     )
-                    member_updates.append(member)
+                    member_updates[(thread_guid, member["outlook_id"])] = member
                 continue
 
             for member in changed:
                 state = valid_state_by_id.get(member["outlook_id"])
                 if state is not None:
                     member.update(
+                        message_id=state.exchange_id or member["message_id"],
                         folder_id=state.folder_id,
                         folder_key=self.folder_key_by_id.get(state.folder_id),
                     )
                 member["detached"] = True
-                member_updates.append(member)
+                member_updates[(thread_guid, member["outlook_id"])] = member
 
         if route_updates or member_updates:
             self.store.update_thread_index(
                 scope=self.scope,
                 routes=route_updates,
-                members=member_updates,
+                members=member_updates.values(),
             )
 
     @staticmethod
     def _state_matches_member(
         state: ThreadMessageState,
-        member: dict[str, Any],
         *,
         thread_guid: str,
     ) -> bool:
-        message_id = str(member.get("message_id", ""))
-        stable_id_matches = bool(
-            not state.exchange_id
-            or not message_id
-            or message_id.startswith("outlook:")
-            or state.exchange_id == message_id
-        )
-        return state.thread_guid == thread_guid and stable_id_matches
+        return state.thread_guid == thread_guid
 
     def _highest_priority(self, folders: set[str]) -> str:
         return min(

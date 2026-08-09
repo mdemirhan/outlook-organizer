@@ -32,6 +32,33 @@ def test_message_reader_includes_hidden_outlook_thread_guid() -> None:
     assert "«class lOTd» of messageRef" in READ_MESSAGES_IN_FOLDER_ORDER
 
 
+def test_message_thread_guid_is_stripped_before_indexing() -> None:
+    adapter = OutlookAdapter()
+    row = "\x1f".join(
+        [
+            "42",
+            "exchange-42",
+            "101",
+            "Inbox",
+            "Subject",
+            "Sender",
+            "sender@example.com",
+            "",
+            "",
+            "2026-08-09T00:00:00Z",
+            "not flagged",
+            "",
+            "",
+            "false",
+            "thread-guid\n",
+        ]
+    )
+
+    messages = adapter._parse_messages(row)
+
+    assert messages[0].thread_guid == "thread-guid"
+
+
 def test_thread_state_reader_is_targeted_by_message_id() -> None:
     assert "repeat with messageIDText in argv" in READ_THREAD_STATES_BY_IDS
     assert "every message of folderRef" not in READ_THREAD_STATES_BY_IDS
@@ -41,7 +68,7 @@ def test_thread_state_response_is_parsed() -> None:
     adapter = OutlookAdapter()
 
     states = adapter._parse_thread_states(
-        "42\x1fexchange-42\x1f110\x1fInternal General\x1fthread-guid"
+        "42\x1fexchange-42\x1f110\x1fInternal General\x1fthread-guid\n"
     )
 
     assert len(states) == 1
