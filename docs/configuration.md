@@ -63,9 +63,9 @@ folders:
     parent: organized_primary
 ```
 
-`inbox`, `organized_primary`, and `organized_secondary` are required. IDs must
-be unique. Parent keys must exist and cannot form cycles. Discover current IDs
-with `outlook-organizer mail folders`.
+Only `inbox` is required; the other keys are stable identifiers chosen by the
+user. IDs must be unique. Parent keys are optional, must exist when used, and
+cannot form cycles. Discover current IDs with `outlook-organizer mail folders`.
 
 ## `triage.yaml`
 

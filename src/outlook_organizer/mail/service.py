@@ -95,7 +95,11 @@ class FolderAdminService:
         if not confirm:
             raise ValueError("confirm=true is required to create Outlook folders")
         inbox = self.context.folders.folders["inbox"]
-        roots = ("organized_primary", "organized_secondary")
+        roots = tuple(
+            key
+            for key, folder in self.context.folders.folders.items()
+            if key != "inbox" and folder.parent is None
+        )
         return {
             "folders": {
                 key: self.writer.ensure_mail_folder(

@@ -131,7 +131,7 @@ class FolderCatalogConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_catalog(self) -> FolderCatalogConfig:
-        required = {"inbox", "organized_primary", "organized_secondary"}
+        required = {"inbox"}
         if missing := sorted(required - set(self.folders)):
             raise ValueError(f"mail-folders.yaml is missing required folders: {missing}")
         ids = [folder.id for folder in self.folders.values()]

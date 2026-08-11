@@ -46,7 +46,7 @@ class BriefFolderPolicyConfig(StrictModel):
 
 class BriefDefaultsConfig(StrictModel):
     scopes: list[BriefScopeConfig] = Field(
-        default_factory=lambda: [BriefScopeConfig(folder="organized_primary", recursive=True)]
+        default_factory=lambda: [BriefScopeConfig(folder="inbox")]
     )
     period: BriefPeriod = "today"
     read_state: BriefReadState = "all"

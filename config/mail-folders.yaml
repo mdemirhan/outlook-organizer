@@ -1,6 +1,6 @@
 # Sample shared Outlook folder catalog used by brief and triage.
 # Discover current IDs with `uv run outlook-organizer mail folders`; IDs must be
-# unique. The required keys are inbox, organized_primary, organized_secondary.
+# unique. The only required key is inbox.
 version: 1
 # Upper bound used while discovering Outlook folders, not a message limit.
 scan_limit: 1000
